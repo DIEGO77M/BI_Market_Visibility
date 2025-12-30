@@ -197,8 +197,16 @@ def add_audit_columns(df):
     Returns:
         DataFrame with added audit columns
     """
+    # Check which metadata column exists
+    if "_metadata_file_path" in df.columns:
+        # Excel files read with pandas
+        source_col = col("_metadata_file_path")
+    else:
+        # CSV files read with Spark (has _metadata pseudo-column)
+        source_col = col("_metadata.file_path")
+    
     return df.withColumn("ingestion_timestamp", current_timestamp()) \
-             .withColumn("source_file", col("_metadata.file_path")) \
+             .withColumn("source_file", source_col) \
              .withColumn("ingestion_date", lit(datetime.now().strftime("%Y-%m-%d")))
 
 
