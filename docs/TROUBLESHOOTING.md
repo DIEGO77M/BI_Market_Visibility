@@ -175,7 +175,58 @@ spark.read.csv(path, header=True, sep=";")
 
 ## ⚠️ Moderate Issues
 
-### Issue #5: Schema Inference with Special Characters
+### Issue #5: Missing spark-excel Library
+
+**Error:**
+```
+[DATA_SOURCE_NOT_FOUND] Failed to find the data source: com.crealytics.spark.excel. 
+Make sure the provider name is correct and the package is properly registered.
+```
+
+**Root Cause:**
+- Excel files require external library `spark-excel`
+- Library not installed by default in Databricks clusters
+- Databricks Runtime doesn't include Excel reading capabilities out-of-the-box
+
+**Solution #1 - Notebook-level Installation (Temporary):**
+```python
+# Add at beginning of notebook
+%pip install spark-excel
+```
+
+**Solution #2 - Cluster-level Installation (Permanent):**
+1. Go to Databricks cluster configuration
+2. Navigate to "Libraries" tab
+3. Click "Install New"
+4. Select "Maven" 
+5. Enter: `com.crealytics:spark-excel_2.12:3.3.1_0.18.5`
+6. Restart cluster
+
+**Solution #3 - Spark Configuration (Session-level):**
+```python
+spark = SparkSession.builder \
+    .config("spark.jars.packages", "com.crealytics:spark-excel_2.12:3.3.1_0.18.5") \
+    .getOrCreate()
+```
+
+**Implemented Solution:**
+- Combined approach: `%pip install` + Spark config
+- Ensures library availability for current session
+- No cluster restart required
+
+**Key Learning:**
+- Excel is not a standard big data format (use Parquet/Delta in production)
+- External libraries need explicit installation
+- Maven coordinates: `groupId:artifactId:version`
+
+**Prevention:**
+- Document all external dependencies in `requirements.txt`
+- Use cluster init scripts for permanent installations
+- Consider converting Excel to CSV/Parquet at source
+
+---
+
+### Issue #6: Schema Inference with Special Characters
 
 **Challenge:**
 - `inferSchema=True` sometimes misinterprets columns with special chars
@@ -210,7 +261,7 @@ df = spark.read \
 
 ---
 
-### Issue #6: Dynamic Column Detection
+### Issue #7: Dynamic Column Detection
 
 **Challenge:**
 - Hardcoded column names fail when source schema changes

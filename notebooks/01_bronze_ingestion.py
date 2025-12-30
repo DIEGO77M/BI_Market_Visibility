@@ -39,6 +39,15 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### Install Required Libraries
+
+# COMMAND ----------
+
+# MAGIC %pip install spark-excel
+
+# COMMAND ----------
+
 # Import required libraries
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
@@ -50,11 +59,12 @@ from delta.tables import DeltaTable
 from datetime import datetime
 import os
 
-# Initialize Spark session
+# Initialize Spark session with spark-excel support
 spark = SparkSession.builder \
     .appName("Bronze_Ingestion") \
     .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension") \
     .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog") \
+    .config("spark.jars.packages", "com.crealytics:spark-excel_2.12:3.3.1_0.18.5") \
     .getOrCreate()
 
 print("✅ Spark session initialized")
