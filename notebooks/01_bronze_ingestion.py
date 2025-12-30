@@ -39,15 +39,6 @@
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ### Install Required Libraries
-
-# COMMAND ----------
-
-# MAGIC %pip install spark-excel
-
-# COMMAND ----------
-
 # Import required libraries
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
@@ -59,7 +50,8 @@ from delta.tables import DeltaTable
 from datetime import datetime
 import os
 
-# Initialize Spark session with spark-excel support
+# Initialize Spark session with spark-excel support (Maven package)
+# Note: spark-excel is a JVM library, not a Python package
 spark = SparkSession.builder \
     .appName("Bronze_Ingestion") \
     .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension") \
@@ -69,6 +61,7 @@ spark = SparkSession.builder \
 
 print("✅ Spark session initialized")
 print(f"Spark Version: {spark.version}")
+print("📦 spark-excel library loaded via Maven coordinates")
 
 # COMMAND ----------
 

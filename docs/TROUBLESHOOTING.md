@@ -185,44 +185,58 @@ Make sure the provider name is correct and the package is properly registered.
 
 **Root Cause:**
 - Excel files require external library `spark-excel`
-- Library not installed by default in Databricks clusters
-- Databricks Runtime doesn't include Excel reading capabilities out-of-the-box
+- It's a **JVM/Maven library**, not a Python package
+- Cannot be installed with `pip` (common mistake)
+- Library not included by default in Databricks clusters
 
-**Solution #1 - Notebook-level Installation (Temporary):**
+**Failed Solution (Common Mistake):**
 ```python
-# Add at beginning of notebook
+# ❌ WRONG - spark-excel doesn't exist in PyPI
 %pip install spark-excel
+# Error: Could not find a version that satisfies the requirement spark-excel
 ```
 
-**Solution #2 - Cluster-level Installation (Permanent):**
-1. Go to Databricks cluster configuration
-2. Navigate to "Libraries" tab
-3. Click "Install New"
-4. Select "Maven" 
-5. Enter: `com.crealytics:spark-excel_2.12:3.3.1_0.18.5`
-6. Restart cluster
-
-**Solution #3 - Spark Configuration (Session-level):**
+**Solution #1 - Spark Session Configuration (Recommended for Notebooks):**
 ```python
+# ✅ CORRECT - Use Maven coordinates
 spark = SparkSession.builder \
     .config("spark.jars.packages", "com.crealytics:spark-excel_2.12:3.3.1_0.18.5") \
     .getOrCreate()
 ```
 
+**Solution #2 - Cluster-level Installation (Recommended for Production):**
+1. Go to Databricks cluster configuration
+2. Navigate to "Libraries" tab
+3. Click "Install New"
+4. Select **"Maven"** (not PyPI)
+5. Enter: `com.crealytics:spark-excel_2.12:3.3.1_0.18.5`
+6. Install and restart cluster
+
+**Solution #3 - Init Script (Enterprise Approach):**
+```bash
+#!/bin/bash
+# cluster-init.sh
+/databricks/spark/bin/spark-shell --packages com.crealytics:spark-excel_2.12:3.3.1_0.18.5
+```
+
 **Implemented Solution:**
-- Combined approach: `%pip install` + Spark config
-- Ensures library availability for current session
+- Spark session config with Maven coordinates
+- Downloads JAR automatically on first run
 - No cluster restart required
+- Works in notebooks and jobs
 
 **Key Learning:**
-- Excel is not a standard big data format (use Parquet/Delta in production)
-- External libraries need explicit installation
-- Maven coordinates: `groupId:artifactId:version`
+- **pip is for Python packages** (PyPI)
+- **Maven is for JVM libraries** (Scala/Java)
+- Excel support requires JVM library (Spark is Scala-based)
+- Check package registry before attempting installation
+- Maven coordinates format: `groupId:artifactId_scalaVersion:version`
 
 **Prevention:**
-- Document all external dependencies in `requirements.txt`
-- Use cluster init scripts for permanent installations
-- Consider converting Excel to CSV/Parquet at source
+- Document library type (Python vs JVM) in dependencies
+- Use cluster libraries for production (not session config)
+- Consider converting Excel to Parquet/Delta at source
+- Excel is not recommended for big data pipelines
 
 ---
 
