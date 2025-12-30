@@ -73,17 +73,11 @@ print(f"Spark Version: {spark.version}")
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC -- Create catalog if not exists (in production, this would be pre-created by admin)
-# MAGIC CREATE CATALOG IF NOT EXISTS bi_market;
+# MAGIC -- Using existing catalog 'workspace' and schema 'default'
+# MAGIC -- Create volumes for raw files and bronze tables
+# MAGIC CREATE VOLUME IF NOT EXISTS workspace.default.bi_market_raw;
 # MAGIC 
-# MAGIC -- Create schema
-# MAGIC CREATE SCHEMA IF NOT EXISTS bi_market.data_lake;
-# MAGIC 
-# MAGIC -- Create volume for raw files
-# MAGIC CREATE VOLUME IF NOT EXISTS bi_market.data_lake.raw_files;
-# MAGIC 
-# MAGIC -- Create volume for bronze delta tables  
-# MAGIC CREATE VOLUME IF NOT EXISTS bi_market.data_lake.bronze_tables;
+# MAGIC -- Note: Bronze tables will be managed tables in the same schema
 
 # COMMAND ----------
 
@@ -94,12 +88,11 @@ print(f"Spark Version: {spark.version}")
 
 # Define paths using Unity Catalog Volumes (PROFESSIONAL APPROACH)
 # This is the standard way in enterprise Databricks environments
-CATALOG = "bi_market"
-SCHEMA = "data_lake"
+CATALOG = "workspace"
+SCHEMA = "default"
 
 # Volumes for file storage
-RAW_VOLUME = f"/Volumes/{CATALOG}/{SCHEMA}/raw_files"
-BRONZE_VOLUME = f"/Volumes/{CATALOG}/{SCHEMA}/bronze_tables"
+RAW_VOLUME = f"/Volumes/{CATALOG}/{SCHEMA}/bi_market_raw"
 
 # Define source paths (Unity Catalog Volumes)
 MASTER_PDV_PATH = f"{RAW_VOLUME}/Master_PDV/master_pdv_raw.csv"
@@ -115,13 +108,11 @@ BRONZE_SELL_IN = f"{CATALOG}.{SCHEMA}.bronze_sell_in"
 
 # Define layer paths
 RAW_PATH = f"{RAW_VOLUME}"
-BRONZE_PATH = f"{BRONZE_VOLUME}"
 
 print("📁 Configuration:")
 print(f"  Catalog: {CATALOG}")
 print(f"  Schema: {SCHEMA}")
 print(f"  Raw Volume: {RAW_VOLUME}")
-print(f"  Bronze Volume: {BRONZE_VOLUME}")
 print(f"\n📝 Source Paths:")
 print(f"  Master_PDV: {MASTER_PDV_PATH}")
 print(f"  Master_Products: {MASTER_PRODUCTS_PATH}")
