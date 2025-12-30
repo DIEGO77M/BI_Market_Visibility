@@ -145,6 +145,7 @@ pytest src/tests/
 
 ## 📚 Documentation
 
+- **[Quick Reference Guide](docs/QUICK_REFERENCE.md)** - ⚡ Fast command reference for daily development
 - **[Development Setup Guide](docs/DEVELOPMENT_SETUP.md)** - Complete guide for Databricks, VS Code, and GitHub integration
 - **[Integration Architecture](docs/INTEGRATION_ARCHITECTURE.md)** - Visual diagrams of system integration
 - **[Data Dictionary](docs/data_dictionary.md)** - Schema and field definitions
