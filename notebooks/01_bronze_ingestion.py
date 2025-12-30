@@ -39,6 +39,15 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### Install Required Libraries for Excel Reading
+
+# COMMAND ----------
+
+# MAGIC %pip install openpyxl pandas
+
+# COMMAND ----------
+
 # Import required libraries
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
@@ -49,19 +58,15 @@ from pyspark.sql.types import *
 from delta.tables import DeltaTable
 from datetime import datetime
 import os
+import pandas as pd
 
-# Initialize Spark session with spark-excel support (Maven package)
-# Note: spark-excel is a JVM library, not a Python package
-spark = SparkSession.builder \
-    .appName("Bronze_Ingestion") \
-    .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension") \
-    .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog") \
-    .config("spark.jars.packages", "com.crealytics:spark-excel_2.12:3.3.1_0.18.5") \
-    .getOrCreate()
+# Note: In Databricks, the SparkSession already exists as 'spark'
+# We cannot reconfigure it with .getOrCreate() to add Maven packages
+# Solution: Use pandas to read Excel, then convert to PySpark DataFrame
 
 print("✅ Spark session initialized")
 print(f"Spark Version: {spark.version}")
-print("📦 spark-excel library loaded via Maven coordinates")
+print("📦 Using pandas + openpyxl for Excel file reading")
 
 # COMMAND ----------
 
@@ -134,6 +139,54 @@ print(f"  {BRONZE_SELL_IN}")
 
 # COMMAND ----------
 
+def read_excel_files(path_pattern, spark_session):
+    """
+    Read Excel files using pandas and convert to PySpark DataFrame.
+    Workaround for Databricks environments where spark-excel cannot be configured.
+    
+    Args:
+        path_pattern: Path pattern to Excel files (supports wildcards)
+        spark_session: Active SparkSession
+        
+    Returns:
+        PySpark DataFrame with combined data from all matching files
+    """
+    import glob
+    from pyspark.sql import DataFrame
+    
+    # Convert Volumes path to local file system path for pandas
+    # In Databricks, /Volumes/ paths can be accessed directly
+    local_path = path_pattern.replace("/Volumes/", "/Volumes/")
+    
+    # Find all matching Excel files
+    excel_files = glob.glob(local_path)
+    
+    if not excel_files:
+        raise FileNotFoundError(f"No Excel files found at: {path_pattern}")
+    
+    print(f"📂 Found {len(excel_files)} Excel file(s)")
+    
+    # Read all Excel files with pandas
+    dfs_pandas = []
+    for file_path in excel_files:
+        print(f"   Reading: {file_path}")
+        df_pandas = pd.read_excel(file_path, engine='openpyxl')
+        # Add file metadata
+        df_pandas['_file_path'] = file_path
+        dfs_pandas.append(df_pandas)
+    
+    # Combine all dataframes
+    combined_df_pandas = pd.concat(dfs_pandas, ignore_index=True)
+    
+    # Convert to PySpark DataFrame
+    df_spark = spark_session.createDataFrame(combined_df_pandas)
+    
+    # Rename metadata column to match Unity Catalog pattern
+    df_spark = df_spark.withColumnRenamed("_file_path", "_metadata_file_path")
+    
+    return df_spark
+
+
 def add_audit_columns(df):
     """
     Add audit columns to track data lineage and ingestion metadata.
@@ -144,8 +197,14 @@ def add_audit_columns(df):
     Returns:
         DataFrame with added audit columns
     """
+    # Check if _metadata.file_path exists (CSV files) or _metadata_file_path (Excel via pandas)
+    if "_metadata_file_path" in df.columns:
+        source_col = col("_metadata_file_path")
+    else:
+        source_col = col("_metadata.file_path")
+    
     return df.withColumn("ingestion_timestamp", current_timestamp()) \
-             .withColumn("source_file", col("_metadata.file_path")) \
+             .withColumn("source_file", source_col) \
              .withColumn("ingestion_date", lit(datetime.now().strftime("%Y-%m-%d")))
 
 
@@ -314,12 +373,9 @@ print(f"✅ Master_Products successfully written to: {BRONZE_MASTER_PRODUCTS}")
 
 print("🔄 Starting Price_Audit ingestion...")
 
-# Read all Excel files from Price_Audit folder
-df_price_audit = spark.read \
-    .format("com.crealytics.spark.excel") \
-    .option("header", "true") \
-    .option("inferSchema", "true") \
-    .load(f"{PRICE_AUDIT_PATH}/*.xlsx")
+# Read all Excel files from Price_Audit folder using pandas
+# Note: Using pandas + openpyxl as workaround for Databricks spark-excel limitation
+df_price_audit = read_excel_files(f"{PRICE_AUDIT_PATH}/*.xlsx", spark)
 
 # Add audit columns
 df_price_audit = add_audit_columns(df_price_audit)
@@ -380,12 +436,9 @@ print(f"📁 Partitioned by: year_month")
 
 print("🔄 Starting Sell-In ingestion...")
 
-# Read Excel files from Sell-In folder
-df_sell_in = spark.read \
-    .format("com.crealytics.spark.excel") \
-    .option("header", "true") \
-    .option("inferSchema", "true") \
-    .load(f"{SELL_IN_PATH}/*.xlsx")
+# Read Excel files from Sell-In folder using pandas
+# Note: Using pandas + openpyxl as workaround for Databricks spark-excel limitation
+df_sell_in = read_excel_files(f"{SELL_IN_PATH}/*.xlsx", spark)
 
 # Add audit columns
 df_sell_in = add_audit_columns(df_sell_in)
