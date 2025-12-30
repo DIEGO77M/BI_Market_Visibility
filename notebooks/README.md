@@ -1,53 +1,86 @@
-# Databricks Notebooks
+# 📓 Databricks Notebooks
 
-## Execution Order
+> **Note:** These notebooks are in Databricks `.py` format (not `.ipynb`). Import them directly to Databricks Workspace or view the Python code on GitHub.
+
+## 🎯 Medallion Architecture Implementation
 
 Execute notebooks in the following order:
 
-1. **01_bronze_ingestion.ipynb** - Ingest raw data into Bronze layer
-2. **02_silver_transformation.ipynb** - Clean and validate data in Silver layer  
-3. **03_gold_analytics.ipynb** - Create business-ready datasets in Gold layer
-
-## Notebook Descriptions
-
-### 01_bronze_ingestion.ipynb
-
-**Purpose:** Ingest raw data from source systems with minimal processing.
-
-**Inputs:**
-- Raw data files from `data/raw/` directory
-- Supported formats: CSV, JSON, Parquet, Excel
-
-**Outputs:**
-- Delta tables in `data/bronze/` directory
-- Ingestion metadata and logs
-
-**Key Operations:**
-- Read source files
-- Add ingestion timestamp
-- Write to Delta format
-- Handle schema inference
-
-**Runtime:** ~10 minutes
+1. **[01_bronze_ingestion.py](01_bronze_ingestion.py)** ✅ - Raw data ingestion into Delta Lake
+2. **[02_silver_standardization.py](02_silver_standardization.py)** ✅ - Data standardization and quality
+3. **03_gold_analytics.py** 🚧 - Business aggregations and star schema (Coming soon)
 
 ---
 
-### 02_silver_transformation.ipynb
+## 📊 Notebook Details
 
-**Purpose:** Clean, validate, and standardize data for analytics.
+### 01_bronze_ingestion.py ✅ COMPLETED
+
+**Purpose:** Ingest raw data from multiple sources with ACID guarantees
 
 **Inputs:**
-- Bronze layer Delta tables
+- CSV files: Master_PDV, Master_Products
+- Excel files (24): Price_Audit (partitioned by year_month)
+- Excel files (2): Sell-In (partitioned by year)
 
 **Outputs:**
-- Cleaned Delta tables in `data/silver/` directory
-- Data quality reports
-- Validation logs
+- `workspace.default.bronze_master_pdv` (51 rows)
+- `workspace.default.bronze_master_products` (201 rows)
+- `workspace.default.bronze_price_audit` (1,200+ rows, partitioned)
+- `workspace.default.bronze_sell_in` (400+ rows, partitioned)
 
-**Key Operations:**
-- Remove duplicates
-- Handle null values
-- Standardize formats
+**Key Features:**
+- Unity Catalog managed tables
+- Delta Lake with column mapping
+- File-by-file Excel processing (low memory)
+- Audit columns (ingestion_timestamp, source_file)
+- Dynamic partition overwrite
+- Metrics from Delta History (no count operations)
+
+**Runtime:** ~2-4 minutes (Serverless optimized)
+
+**Technical Highlights:**
+- ✅ Solved DBFS public access issue → Unity Catalog Volumes
+- ✅ CSV delimiter detection (semicolon vs comma)
+- ✅ Excel reading without spark-excel → pandas + openpyxl
+- ✅ Special characters in columns → Column Mapping enabled
+- ✅ 3x performance improvement with optimizations
+
+---
+
+### 02_silver_standardization.py ✅ COMPLETED
+
+**Purpose:** Standardize and validate Bronze data with business rules
+
+**Inputs:**
+- `workspace.default.bronze_master_pdv`
+- `workspace.default.bronze_master_products`
+- `workspace.default.bronze_price_audit`
+- `workspace.default.bronze_sell_in`
+
+**Outputs:**
+- `workspace.default.silver_master_pdv` (deduplicated, standardized)
+- `workspace.default.silver_master_products` (price validated)
+- `workspace.default.silver_price_audit` (filtered, partitioned by year_month)
+- `workspace.default.silver_sell_in` (enriched, partitioned by year)
+
+**Transformations Applied:**
+1. **Schema standardization** - snake_case, explicit types
+2. **Text normalization** - trim, uppercase
+3. **Deduplication** - by business keys (PDV code, Product code)
+4. **Domain validations** - prices > 0, no future dates
+5. **Derived columns** - unit_price, is_active_sale, year/month
+6. **Audit metadata** - processing_date, processing_timestamp
+
+**Architecture Compliance:**
+- ✅ Reads ONLY from Bronze Delta tables
+- ✅ No cache/persist (Serverless optimized)
+- ✅ ONE write action per table
+- ✅ No unnecessary count/show operations
+- ✅ Validation via Delta History
+- ✅ No over-engineering (simple, explicit)
+
+**Runtime:** ~1-2 minutes
 - Data type conversions
 - Apply business rules
 - Data quality checks
