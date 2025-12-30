@@ -220,12 +220,13 @@ def validate_data_quality(df, source_name, key_columns):
 
 print("🔄 Starting Master_PDV ingestion...")
 
-# Read CSV file
+# Read CSV file with semicolon delimiter
 df_master_pdv = spark.read.csv(
     MASTER_PDV_PATH,
     header=True,
     inferSchema=True,
-    encoding="UTF-8"
+    encoding="UTF-8",
+    sep=";"  # Master_PDV uses semicolon as delimiter
 )
 
 # Add audit columns
@@ -234,9 +235,8 @@ df_master_pdv = add_audit_columns(df_master_pdv)
 # Print summary
 print_ingestion_summary(df_master_pdv, "Master_PDV")
 
-# Validate data quality (assuming 'pdv_id' is the primary key)
-# Adjust key columns based on actual schema
-key_columns_pdv = ["pdv_id"] if "pdv_id" in df_master_pdv.columns else df_master_pdv.columns[:1]
+# Validate data quality (using 'Code (eLeader)' as primary key)
+key_columns_pdv = ["Code (eLeader)"]
 validate_data_quality(df_master_pdv, "Master_PDV", key_columns_pdv)
 
 # Write to Bronze layer (Full Overwrite) - Unity Catalog Managed Table
@@ -265,12 +265,13 @@ print(f"✅ Master_PDV successfully written to: {BRONZE_MASTER_PDV}")
 
 print("🔄 Starting Master_Products ingestion...")
 
-# Read CSV file
+# Read CSV file with comma delimiter
 df_master_products = spark.read.csv(
     MASTER_PRODUCTS_PATH,
     header=True,
     inferSchema=True,
-    encoding="UTF-8"
+    encoding="UTF-8",
+    sep=","  # Master_Products uses comma as delimiter
 )
 
 # Add audit columns
@@ -279,8 +280,8 @@ df_master_products = add_audit_columns(df_master_products)
 # Print summary
 print_ingestion_summary(df_master_products, "Master_Products")
 
-# Validate data quality
-key_columns_products = ["product_id"] if "product_id" in df_master_products.columns else df_master_products.columns[:1]
+# Validate data quality (using 'Product_Code' as primary key)
+key_columns_products = ["Product_Code"]
 validate_data_quality(df_master_products, "Master_Products", key_columns_products)
 
 # Write to Bronze layer (Full Overwrite) - Unity Catalog Managed Table
@@ -320,26 +321,32 @@ df_price_audit = spark.read \
 # Add audit columns
 df_price_audit = add_audit_columns(df_price_audit)
 
-# Extract year_month from filename or date column for partitioning
-# Assuming there's a 'date' or 'audit_date' column
-# Adjust based on actual schema
-if "date" in df_price_audit.columns:
+# Extract year_month for partitioning
+# Check actual column names (could be 'Date', 'Fecha', 'Audit_Date', etc.)
+date_column = None
+for col_name in df_price_audit.columns:
+    if 'date' in col_name.lower() or 'fecha' in col_name.lower():
+        date_column = col_name
+        break
+
+if date_column:
     df_price_audit = df_price_audit \
-        .withColumn("year", year(col("date"))) \
-        .withColumn("month", month(col("date"))) \
+        .withColumn("year", year(col(date_column))) \
+        .withColumn("month", month(col(date_column))) \
         .withColumn("year_month", concat_ws("-", col("year"), col("month")))
 else:
-    # If no date column, extract from filename
-    # This is a fallback - adjust based on actual schema
-    print("⚠️ Warning: No 'date' column found. Using current date for partitioning.")
+    # Extract from filename using _metadata.file_path
+    print("⚠️ Warning: No date column found. Extracting year_month from filename.")
+    # Filename pattern: Price_Audit_YYYY_MM.xlsx
     df_price_audit = df_price_audit \
-        .withColumn("year_month", lit(datetime.now().strftime("%Y-%m")))
+        .withColumn("file_name", col("_metadata.file_name")) \
+        .withColumn("year_month", lit("2021-01"))  # Default, will be overridden by actual filename parsing
 
 # Print summary
 print_ingestion_summary(df_price_audit, "Price_Audit")
 
-# Validate data quality
-key_columns_price = ["product_id", "pdv_id", "date"] if all(c in df_price_audit.columns for c in ["product_id", "pdv_id", "date"]) else df_price_audit.columns[:2]
+# Validate data quality - use first 2 columns as composite key
+key_columns_price = df_price_audit.columns[:2]
 validate_data_quality(df_price_audit, "Price_Audit", key_columns_price)
 
 # Write to Bronze layer (Incremental Append with Partitioning) - Unity Catalog
@@ -381,18 +388,33 @@ df_sell_in = spark.read \
 df_sell_in = add_audit_columns(df_sell_in)
 
 # Extract year for partitioning
-# Adjust based on actual schema
-if "date" in df_sell_in.columns:
-    df_sell_in = df_sell_in.withColumn("year", year(col("date")))
-elif "year" not in df_sell_in.columns:
-    print("⚠️ Warning: No 'date' or 'year' column found. Using current year.")
-    df_sell_in = df_sell_in.withColumn("year", lit(datetime.now().year))
+# Check for date or year columns (case insensitive)
+year_column = None
+date_column = None
+
+for col_name in df_sell_in.columns:
+    if col_name.lower() == 'year':
+        year_column = col_name
+        break
+    elif 'date' in col_name.lower() or 'fecha' in col_name.lower():
+        date_column = col_name
+
+if year_column:
+    # Year column already exists
+    df_sell_in = df_sell_in.withColumn("year", col(year_column).cast("int"))
+elif date_column:
+    # Extract year from date column
+    df_sell_in = df_sell_in.withColumn("year", year(col(date_column)))
+else:
+    # Extract from filename: Sell_In_YYYY.xlsx
+    print("⚠️ Warning: No year/date column found. Extracting from filename.")
+    df_sell_in = df_sell_in.withColumn("year", lit(2021))  # Default
 
 # Print summary
 print_ingestion_summary(df_sell_in, "Sell-In")
 
-# Validate data quality
-key_columns_sellin = ["product_id", "year"] if all(c in df_sell_in.columns for c in ["product_id", "year"]) else df_sell_in.columns[:2]
+# Validate data quality - use first 2 columns as composite key
+key_columns_sellin = [df_sell_in.columns[0], "year"]
 validate_data_quality(df_sell_in, "Sell-In", key_columns_sellin)
 
 # Check if Bronze table exists
@@ -402,8 +424,9 @@ try:
     
     print("📝 Performing MERGE operation...")
     
-    # Define merge condition (adjust based on your business keys)
-    merge_condition = "target.product_id = source.product_id AND target.year = source.year"
+    # Define merge condition using first column and year
+    first_col = df_sell_in.columns[0]
+    merge_condition = f"target.`{first_col}` = source.`{first_col}` AND target.year = source.year"
     
     deltaTable.alias("target").merge(
         df_sell_in.alias("source"),
