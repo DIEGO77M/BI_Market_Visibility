@@ -43,7 +43,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, current_timestamp, lit, year, month, concat_ws,
-    input_file_name, count, countDistinct, sum as spark_sum
+    count, countDistinct, sum as spark_sum
 )
 from pyspark.sql.types import *
 from delta.tables import DeltaTable
@@ -142,7 +142,7 @@ def add_audit_columns(df):
         DataFrame with added audit columns
     """
     return df.withColumn("ingestion_timestamp", current_timestamp()) \
-             .withColumn("source_file", input_file_name()) \
+             .withColumn("source_file", col("_metadata.file_path")) \
              .withColumn("ingestion_date", lit(datetime.now().strftime("%Y-%m-%d")))
 
 
