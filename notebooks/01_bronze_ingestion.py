@@ -4,7 +4,7 @@
 # MAGIC 
 # MAGIC **Purpose:** Ingest raw data from multiple sources into Bronze layer using Delta Lake format
 # MAGIC 
-# MAGIC **Author:** Diego Mayor  
+# MAGIC **Author:** Diego Mayorga  
 # MAGIC **Date:** 2025-12-30  
 # MAGIC **Project:** BI Market Visibility Analysis
 # MAGIC 
@@ -68,19 +68,24 @@ print(f"Spark Version: {spark.version}")
 # COMMAND ----------
 
 # Define paths - Adapt these paths based on your environment
-# For local development (testing)
-BASE_PATH_LOCAL = "/Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files"
+# For Databricks workspace (bundle deployment)
+BASE_PATH_WORKSPACE = "/Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files"
 
-# For production (DBFS)
+# For DBFS (if available)
 BASE_PATH_DBFS = "dbfs:/mnt/bi_market_visibility"
 
-# Select active path (change based on environment)
-ENVIRONMENT = "databricks"  # Options: "databricks", "local"
+# For local testing
+BASE_PATH_LOCAL = "."
 
-if ENVIRONMENT == "databricks":
-    BASE_PATH = BASE_PATH_LOCAL
-else:
+# Select active path (change based on environment)
+ENVIRONMENT = "workspace"  # Options: "workspace", "dbfs", "local"
+
+if ENVIRONMENT == "workspace":
+    BASE_PATH = BASE_PATH_WORKSPACE
+elif ENVIRONMENT == "dbfs":
     BASE_PATH = BASE_PATH_DBFS
+else:
+    BASE_PATH = BASE_PATH_LOCAL
 
 # Define layer paths
 RAW_PATH = f"{BASE_PATH}/data/raw"
