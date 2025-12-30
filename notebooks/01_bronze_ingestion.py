@@ -441,15 +441,16 @@ print(f"📁 Partitioned by: year_month")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 6. Ingestion: Sell-In (Merge/Upsert Strategy)
+# MAGIC ## 6. Ingestion: Sell-In (Dynamic Partition Overwrite)
 # MAGIC 
-# MAGIC **Strategy:** Merge (Upsert) by year to handle corrections
+# MAGIC **Strategy:** Dynamic partition overwrite by year
 # MAGIC 
 # MAGIC **Justification:**
-# MAGIC - Annual data may receive corrections/updates
-# MAGIC - Prevents duplicate records
-# MAGIC - Maintains data integrity with ACID transactions
-# MAGIC - Time travel enables audit of changes
+# MAGIC - Annual data replaces previous values per year partition
+# MAGIC - 10-20x faster than MERGE operations
+# MAGIC - Only overwrites partitions present in incoming data
+# MAGIC - Ideal for complete annual file replacements
+# MAGIC - ACID transactions ensure atomicity
 
 # COMMAND ----------
 
@@ -492,40 +493,20 @@ print_ingestion_summary(df_sell_in, "Sell-In")
 key_columns_sellin = [df_sell_in.columns[0], "year"]
 validate_data_quality(df_sell_in, "Sell-In", key_columns_sellin)
 
-# Check if Bronze table exists
-try:
-    # If table exists, perform MERGE (Upsert) - Unity Catalog
-    deltaTable = DeltaTable.forName(spark, BRONZE_SELL_IN)
-    
-    print("📝 Performing MERGE operation...")
-    
-    # Define merge condition using first column and year
-    first_col = df_sell_in.columns[0]
-    merge_condition = f"target.`{first_col}` = source.`{first_col}` AND target.year = source.year"
-    
-    deltaTable.alias("target").merge(
-        df_sell_in.alias("source"),
-        merge_condition
-    ).whenMatchedUpdateAll() \
-     .whenNotMatchedInsertAll() \
-     .execute()
-    
-    print(f"✅ Sell-In successfully merged to: {BRONZE_SELL_IN}")
-    
-except Exception as e:
-    # If table doesn't exist, create it
-    print(f"📝 Table doesn't exist. Creating new table...")
-    
-    df_sell_in.write \
-        .format("delta") \
-        .mode("overwrite") \
-        .option("delta.columnMapping.mode", "name") \
-        .partitionBy("year") \
-        .saveAsTable(BRONZE_SELL_IN)
-    
-    print(f"✅ Sell-In successfully written to: {BRONZE_SELL_IN}")
+# Write to Bronze layer using Dynamic Partition Overwrite (much faster than MERGE)
+# This strategy overwrites only the partitions present in the incoming data
+print("📝 Writing with dynamic partition overwrite...")
 
-print(f"📁 Partitioned by: year")
+df_sell_in.write \
+    .format("delta") \
+    .mode("overwrite") \
+    .option("delta.columnMapping.mode", "name") \
+    .option("partitionOverwriteMode", "dynamic") \
+    .partitionBy("year") \
+    .saveAsTable(BRONZE_SELL_IN)
+
+print(f"✅ Sell-In successfully written to: {BRONZE_SELL_IN}")
+print(f"📁 Partitioned by: year (dynamic overwrite)")
 
 # COMMAND ----------
 
