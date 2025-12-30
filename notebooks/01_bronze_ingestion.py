@@ -244,6 +244,7 @@ df_master_pdv.write \
     .format("delta") \
     .mode("overwrite") \
     .option("overwriteSchema", "true") \
+    .option("delta.columnMapping.mode", "name") \
     .saveAsTable(BRONZE_MASTER_PDV)
 
 print(f"✅ Master_PDV successfully written to: {BRONZE_MASTER_PDV}")
@@ -287,6 +288,7 @@ df_master_products.write \
     .format("delta") \
     .mode("overwrite") \
     .option("overwriteSchema", "true") \
+    .option("delta.columnMapping.mode", "name") \
     .saveAsTable(BRONZE_MASTER_PRODUCTS)
 
 print(f"✅ Master_Products successfully written to: {BRONZE_MASTER_PRODUCTS}")
@@ -344,6 +346,7 @@ validate_data_quality(df_price_audit, "Price_Audit", key_columns_price)
 df_price_audit.write \
     .format("delta") \
     .mode("append") \
+    .option("delta.columnMapping.mode", "name") \
     .partitionBy("year_month") \
     .saveAsTable(BRONZE_PRICE_AUDIT)
 
@@ -418,6 +421,7 @@ except Exception as e:
     df_sell_in.write \
         .format("delta") \
         .mode("overwrite") \
+        .option("delta.columnMapping.mode", "name") \
         .partitionBy("year") \
         .saveAsTable(BRONZE_SELL_IN)
     
