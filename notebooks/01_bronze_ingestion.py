@@ -294,15 +294,6 @@ df_master_pdv = spark.read.csv(
 # Add audit columns
 df_master_pdv = add_audit_columns(df_master_pdv)
 
-# Cache before multiple actions (summary + validation + write)
-df_master_pdv.cache()
-
-# Print summary
-print_ingestion_summary(df_master_pdv, "Master_PDV")
-
-# Validate data quality
-validate_data_quality(df_master_pdv, "Master_PDV")
-
 # Coalesce to control file count before write
 df_master_pdv = df_master_pdv.coalesce(1)
 
@@ -344,12 +335,8 @@ df_master_products = spark.read.csv(
 # Add audit columns
 df_master_products = add_audit_columns(df_master_products)
 
-# Print summary
-print_ingestion_summary(df_master_products, "Master_Products")
-
-# Validate data quality (using 'Product_Code' as primary key)
-key_columns_products = ["Product_Code"]
-validate_data_quality(df_master_products, "Master_Products", key_columns_products)
+# Coalesce to control file count
+df_master_products = df_master_products.coalesce(1)
 
 # Write to Bronze layer (Full Overwrite) - Unity Catalog Managed Table
 df_master_products.write \
@@ -409,15 +396,6 @@ else:
 # Add audit columns
 df_price_audit = add_audit_columns(df_price_audit)
 
-# Cache before multiple actions
-df_price_audit.cache()
-
-# Print summary
-print_ingestion_summary(df_price_audit, "Price_Audit")
-
-# Validate data quality
-validate_data_quality(df_price_audit, "Price_Audit")
-
 # Coalesce to reduce small files (24 Excel → ~4-6 output files)
 df_price_audit = df_price_audit.coalesce(6)
 
@@ -457,9 +435,6 @@ df_sell_in = read_excel_files(f"{SELL_IN_PATH}/*.xlsx", spark)
 # Add audit columns
 df_sell_in = add_audit_columns(df_sell_in)
 
-# Cache before multiple actions
-df_sell_in.cache()
-
 # Extract year for partitioning
 # Check for date or year columns (case insensitive)
 year_column = None
@@ -483,12 +458,6 @@ else:
     print("⚠️ Warning: No year/date column found. Extracting from filename.")
     df_sell_in = df_sell_in.withColumn("year", lit(2021))  # Default
 
-# Print summary
-print_ingestion_summary(df_sell_in, "Sell-In")
-
-# Validate data quality
-validate_data_quality(df_sell_in, "Sell-In")
-
 # Coalesce to control file count
 df_sell_in = df_sell_in.coalesce(2)
 
@@ -510,12 +479,14 @@ print(f"📁 Partitioned by: year (dynamic overwrite)")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 7. Data Quality Checks & Validation
+# MAGIC ## 7. Ingestion Metrics (from Delta History)
+# MAGIC 
+# MAGIC **Fast metrics without count() operations**
 
 # COMMAND ----------
 
 print("\n" + "="*70)
-print("📊 BRONZE LAYER - FINAL DATA QUALITY REPORT")
+print("📊 BRONZE LAYER - INGESTION METRICS")
 print("="*70 + "\n")
 
 # Dictionary to store table statistics
@@ -526,49 +497,30 @@ bronze_tables = {
     "Sell-In": BRONZE_SELL_IN
 }
 
-summary_stats = []
-
 for table_name, table_full_name in bronze_tables.items():
     try:
-        # Read from Unity Catalog table
-        df_check = spark.table(table_full_name)
-        row_count = df_check.count()
-        col_count = len(df_check.columns)
+        # Get metrics from Delta History (no count() needed)
+        history_df = spark.sql(f"DESCRIBE HISTORY {table_full_name} LIMIT 1")
+        latest = history_df.first()
         
-        # Check for partition columns
-        partitions = "None"
-        if "year_month" in df_check.columns:
-            partitions = f"year_month ({df_check.select('year_month').distinct().count()} partitions)"
-        elif "year" in df_check.columns:
-            partitions = f"year ({df_check.select('year').distinct().count()} partitions)"
+        # Extract metrics from operationMetrics
+        metrics = latest["operationMetrics"]
+        rows_added = metrics.get("numOutputRows", metrics.get("numRows", "N/A"))
+        files_added = metrics.get("numFiles", "N/A")
         
-        summary_stats.append({
-            "Table": table_name,
-            "Rows": f"{row_count:,}",
-            "Columns": col_count,
-            "Partitions": partitions,
-            "Status": "✅ Success"
-        })
-        
-        print(f"✅ {table_name}: {row_count:,} rows, {col_count} columns")
+        print(f"✅ {table_name}:")
+        print(f"   Rows: {rows_added}")
+        print(f"   Files: {files_added}")
+        print(f"   Operation: {latest['operation']}")
+        print()
         
     except Exception as e:
-        summary_stats.append({
-            "Table": table_name,
-            "Rows": "0",
-            "Columns": 0,
-            "Partitions": "N/A",
-            "Status": f"❌ Error: {str(e)[:50]}"
-        })
-        print(f"❌ {table_name}: Error reading table")
+        print(f"❌ {table_name}: {str(e)[:80]}")
+        print()
 
-print("\n" + "="*70)
+print("="*70)
 print("✅ BRONZE LAYER INGESTION COMPLETED")
 print("="*70)
-
-# Display summary as DataFrame
-df_summary = spark.createDataFrame(summary_stats)
-display(df_summary)
 
 # COMMAND ----------
 
