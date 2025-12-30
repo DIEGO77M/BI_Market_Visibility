@@ -59,6 +59,7 @@ from delta.tables import DeltaTable
 from datetime import datetime
 import os
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Note: In Databricks, the SparkSession already exists as 'spark'
 # We cannot reconfigure it with .getOrCreate() to add Maven packages
@@ -66,7 +67,7 @@ import pandas as pd
 
 print("✅ Spark session initialized")
 print(f"Spark Version: {spark.version}")
-print("📦 Using pandas + openpyxl for Excel file reading")
+print("📦 Using pandas + openpyxl for Excel file reading (parallelized)")
 
 # COMMAND ----------
 
@@ -139,14 +140,15 @@ print(f"  {BRONZE_SELL_IN}")
 
 # COMMAND ----------
 
-def read_excel_files(path_pattern, spark_session):
+def read_excel_files(path_pattern, spark_session, max_workers=4):
     """
-    Read Excel files using pandas and convert to PySpark DataFrame.
+    Read Excel files using pandas with parallel processing and convert to PySpark DataFrame.
     Workaround for Databricks environments where spark-excel cannot be configured.
     
     Args:
         path_pattern: Path pattern to Excel files (supports wildcards)
         spark_session: Active SparkSession
+        max_workers: Number of parallel threads (default: 4)
         
     Returns:
         PySpark DataFrame with combined data from all matching files
@@ -165,15 +167,30 @@ def read_excel_files(path_pattern, spark_session):
         raise FileNotFoundError(f"No Excel files found at: {path_pattern}")
     
     print(f"📂 Found {len(excel_files)} Excel file(s)")
+    print(f"⚡ Using {max_workers} parallel threads for processing")
     
-    # Read all Excel files with pandas
-    dfs_pandas = []
-    for file_path in excel_files:
-        print(f"   Reading: {file_path}")
+    def read_single_excel(file_path):
+        """Helper function to read a single Excel file"""
         df_pandas = pd.read_excel(file_path, engine='openpyxl')
-        # Add file metadata
         df_pandas['_file_path'] = file_path
-        dfs_pandas.append(df_pandas)
+        return df_pandas
+    
+    # Read Excel files in parallel
+    dfs_pandas = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks
+        future_to_file = {executor.submit(read_single_excel, file): file for file in excel_files}
+        
+        # Collect results as they complete
+        for future in as_completed(future_to_file):
+            file_path = future_to_file[future]
+            try:
+                df = future.result()
+                dfs_pandas.append(df)
+                print(f"   ✓ Read: {os.path.basename(file_path)}")
+            except Exception as exc:
+                print(f"   ✗ Error reading {file_path}: {exc}")
+                raise
     
     # Combine all dataframes
     combined_df_pandas = pd.concat(dfs_pandas, ignore_index=True)
