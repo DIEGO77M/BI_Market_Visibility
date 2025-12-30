@@ -68,8 +68,8 @@ print(f"Spark Version: {spark.version}")
 # COMMAND ----------
 
 # Define paths - Adapt these paths based on your environment
-# For Databricks workspace (bundle deployment)
-BASE_PATH_WORKSPACE = "/Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files"
+# For Databricks workspace (bundle deployment) - use file:// prefix for Spark
+BASE_PATH_WORKSPACE = "file:/Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files"
 
 # For DBFS (if available)
 BASE_PATH_DBFS = "dbfs:/mnt/bi_market_visibility"
