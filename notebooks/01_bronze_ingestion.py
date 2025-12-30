@@ -197,14 +197,8 @@ def add_audit_columns(df):
     Returns:
         DataFrame with added audit columns
     """
-    # Check if _metadata.file_path exists (CSV files) or _metadata_file_path (Excel via pandas)
-    if "_metadata_file_path" in df.columns:
-        source_col = col("_metadata_file_path")
-    else:
-        source_col = col("_metadata.file_path")
-    
     return df.withColumn("ingestion_timestamp", current_timestamp()) \
-             .withColumn("source_file", source_col) \
+             .withColumn("source_file", col("_metadata.file_path")) \
              .withColumn("ingestion_date", lit(datetime.now().strftime("%Y-%m-%d")))
 
 
@@ -582,10 +576,10 @@ display(df_summary)
 ingestion_metadata = {
     "pipeline_name": "Bronze_Ingestion",
     "execution_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    "environment": ENVIRONMENT,
+    "catalog": CATALOG,
+    "schema": SCHEMA,
     "tables_ingested": len(bronze_tables),
-    "status": "SUCCESS",
-    "bronze_path": BRONZE_PATH
+    "status": "SUCCESS"
 }
 
 print("\n📋 Ingestion Metadata:")
