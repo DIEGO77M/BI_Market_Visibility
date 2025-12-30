@@ -67,47 +67,71 @@ print(f"Spark Version: {spark.version}")
 
 # COMMAND ----------
 
-# Define paths - Adapt these paths based on your environment
-# For Databricks workspace (bundle deployment) - use file:// prefix for Spark
-BASE_PATH_WORKSPACE = "file:/Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files"
+# MAGIC %md
+# MAGIC ### Create Unity Catalog Volume (Run once)
 
-# For DBFS (if available)
-BASE_PATH_DBFS = "dbfs:/mnt/bi_market_visibility"
+# COMMAND ----------
 
-# For local testing
-BASE_PATH_LOCAL = "."
+# MAGIC %sql
+# MAGIC -- Create catalog if not exists (in production, this would be pre-created by admin)
+# MAGIC CREATE CATALOG IF NOT EXISTS bi_market;
+# MAGIC 
+# MAGIC -- Create schema
+# MAGIC CREATE SCHEMA IF NOT EXISTS bi_market.data_lake;
+# MAGIC 
+# MAGIC -- Create volume for raw files
+# MAGIC CREATE VOLUME IF NOT EXISTS bi_market.data_lake.raw_files;
+# MAGIC 
+# MAGIC -- Create volume for bronze delta tables  
+# MAGIC CREATE VOLUME IF NOT EXISTS bi_market.data_lake.bronze_tables;
 
-# Select active path (change based on environment)
-ENVIRONMENT = "workspace"  # Options: "workspace", "dbfs", "local"
+# COMMAND ----------
 
-if ENVIRONMENT == "workspace":
-    BASE_PATH = BASE_PATH_WORKSPACE
-elif ENVIRONMENT == "dbfs":
-    BASE_PATH = BASE_PATH_DBFS
-else:
-    BASE_PATH = BASE_PATH_LOCAL
+# MAGIC %md
+# MAGIC ### Path Configuration (Unity Catalog Volumes)
+
+# COMMAND ----------
+
+# Define paths using Unity Catalog Volumes (PROFESSIONAL APPROACH)
+# This is the standard way in enterprise Databricks environments
+CATALOG = "bi_market"
+SCHEMA = "data_lake"
+
+# Volumes for file storage
+RAW_VOLUME = f"/Volumes/{CATALOG}/{SCHEMA}/raw_files"
+BRONZE_VOLUME = f"/Volumes/{CATALOG}/{SCHEMA}/bronze_tables"
+
+# Define source paths (Unity Catalog Volumes)
+MASTER_PDV_PATH = f"{RAW_VOLUME}/Master_PDV/master_pdv_raw.csv"
+MASTER_PRODUCTS_PATH = f"{RAW_VOLUME}/Master_Products/product_master_raw.csv"
+PRICE_AUDIT_PATH = f"{RAW_VOLUME}/Price_Audit"
+SELL_IN_PATH = f"{RAW_VOLUME}/Sell-In"
+
+# Define target paths (Delta tables in Unity Catalog)
+BRONZE_MASTER_PDV = f"{CATALOG}.{SCHEMA}.bronze_master_pdv"
+BRONZE_MASTER_PRODUCTS = f"{CATALOG}.{SCHEMA}.bronze_master_products"
+BRONZE_PRICE_AUDIT = f"{CATALOG}.{SCHEMA}.bronze_price_audit"
+BRONZE_SELL_IN = f"{CATALOG}.{SCHEMA}.bronze_sell_in"
 
 # Define layer paths
-RAW_PATH = f"{BASE_PATH}/data/raw"
-BRONZE_PATH = f"{BASE_PATH}/data/bronze"
-
-# Define source paths
-MASTER_PDV_PATH = f"{RAW_PATH}/Master_PDV/master_pdv_raw.csv"
-MASTER_PRODUCTS_PATH = f"{RAW_PATH}/Master_Products/product_master_raw.csv"
-PRICE_AUDIT_PATH = f"{RAW_PATH}/Price_Audit"
-SELL_IN_PATH = f"{RAW_PATH}/Sell-In"
-
-# Define target paths
-BRONZE_MASTER_PDV = f"{BRONZE_PATH}/master_pdv"
-BRONZE_MASTER_PRODUCTS = f"{BRONZE_PATH}/master_products"
-BRONZE_PRICE_AUDIT = f"{BRONZE_PATH}/price_audit"
-BRONZE_SELL_IN = f"{BRONZE_PATH}/sell_in"
+RAW_PATH = f"{RAW_VOLUME}"
+BRONZE_PATH = f"{BRONZE_VOLUME}"
 
 print("📁 Configuration:")
-print(f"  Environment: {ENVIRONMENT}")
-print(f"  Base Path: {BASE_PATH}")
-print(f"  Raw Path: {RAW_PATH}")
-print(f"  Bronze Path: {BRONZE_PATH}")
+print(f"  Catalog: {CATALOG}")
+print(f"  Schema: {SCHEMA}")
+print(f"  Raw Volume: {RAW_VOLUME}")
+print(f"  Bronze Volume: {BRONZE_VOLUME}")
+print(f"\n📝 Source Paths:")
+print(f"  Master_PDV: {MASTER_PDV_PATH}")
+print(f"  Master_Products: {MASTER_PRODUCTS_PATH}")
+print(f"  Price_Audit: {PRICE_AUDIT_PATH}")
+print(f"  Sell-In: {SELL_IN_PATH}")
+print(f"\n📊 Target Tables:")
+print(f"  {BRONZE_MASTER_PDV}")
+print(f"  {BRONZE_MASTER_PRODUCTS}")
+print(f"  {BRONZE_PRICE_AUDIT}")
+print(f"  {BRONZE_SELL_IN}")
 
 # COMMAND ----------
 
@@ -224,12 +248,12 @@ print_ingestion_summary(df_master_pdv, "Master_PDV")
 key_columns_pdv = ["pdv_id"] if "pdv_id" in df_master_pdv.columns else df_master_pdv.columns[:1]
 validate_data_quality(df_master_pdv, "Master_PDV", key_columns_pdv)
 
-# Write to Bronze layer (Full Overwrite)
+# Write to Bronze layer (Full Overwrite) - Unity Catalog Managed Table
 df_master_pdv.write \
     .format("delta") \
     .mode("overwrite") \
     .option("overwriteSchema", "true") \
-    .save(BRONZE_MASTER_PDV)
+    .saveAsTable(BRONZE_MASTER_PDV)
 
 print(f"✅ Master_PDV successfully written to: {BRONZE_MASTER_PDV}")
 
@@ -267,12 +291,12 @@ print_ingestion_summary(df_master_products, "Master_Products")
 key_columns_products = ["product_id"] if "product_id" in df_master_products.columns else df_master_products.columns[:1]
 validate_data_quality(df_master_products, "Master_Products", key_columns_products)
 
-# Write to Bronze layer (Full Overwrite)
+# Write to Bronze layer (Full Overwrite) - Unity Catalog Managed Table
 df_master_products.write \
     .format("delta") \
     .mode("overwrite") \
     .option("overwriteSchema", "true") \
-    .save(BRONZE_MASTER_PRODUCTS)
+    .saveAsTable(BRONZE_MASTER_PRODUCTS)
 
 print(f"✅ Master_Products successfully written to: {BRONZE_MASTER_PRODUCTS}")
 
@@ -325,12 +349,12 @@ print_ingestion_summary(df_price_audit, "Price_Audit")
 key_columns_price = ["product_id", "pdv_id", "date"] if all(c in df_price_audit.columns for c in ["product_id", "pdv_id", "date"]) else df_price_audit.columns[:2]
 validate_data_quality(df_price_audit, "Price_Audit", key_columns_price)
 
-# Write to Bronze layer (Incremental Append with Partitioning)
+# Write to Bronze layer (Incremental Append with Partitioning) - Unity Catalog
 df_price_audit.write \
     .format("delta") \
     .mode("append") \
     .partitionBy("year_month") \
-    .save(BRONZE_PRICE_AUDIT)
+    .saveAsTable(BRONZE_PRICE_AUDIT)
 
 print(f"✅ Price_Audit successfully written to: {BRONZE_PRICE_AUDIT}")
 print(f"📁 Partitioned by: year_month")
@@ -379,8 +403,8 @@ validate_data_quality(df_sell_in, "Sell-In", key_columns_sellin)
 
 # Check if Bronze table exists
 try:
-    # If table exists, perform MERGE (Upsert)
-    deltaTable = DeltaTable.forPath(spark, BRONZE_SELL_IN)
+    # If table exists, perform MERGE (Upsert) - Unity Catalog
+    deltaTable = DeltaTable.forName(spark, BRONZE_SELL_IN)
     
     print("📝 Performing MERGE operation...")
     
@@ -404,7 +428,7 @@ except Exception as e:
         .format("delta") \
         .mode("overwrite") \
         .partitionBy("year") \
-        .save(BRONZE_SELL_IN)
+        .saveAsTable(BRONZE_SELL_IN)
     
     print(f"✅ Sell-In successfully written to: {BRONZE_SELL_IN}")
 
@@ -431,9 +455,10 @@ bronze_tables = {
 
 summary_stats = []
 
-for table_name, table_path in bronze_tables.items():
+for table_name, table_full_name in bronze_tables.items():
     try:
-        df_check = spark.read.format("delta").load(table_path)
+        # Read from Unity Catalog table
+        df_check = spark.table(table_full_name)
         row_count = df_check.count()
         col_count = len(df_check.columns)
         
