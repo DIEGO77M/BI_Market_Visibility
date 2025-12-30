@@ -1,0 +1,102 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Data files - Exclude large files but keep sample data
+*.csv
+*.xlsx
+*.parquet
+!*_sample.csv
+!*_sample.xlsx
+
+# Keep small raw data samples for portfolio demonstration
+!data/raw/**/master_pdv_raw.csv
+!data/raw/**/product_master_raw.csv
+
+# Exclude processed data folders content but keep structure
+data/bronze/**
+!data/bronze/.gitkeep
+data/silver/**
+!data/silver/.gitkeep
+data/gold/**
+!data/gold/.gitkeep
+
+# Databricks
+.databricks/
+*.dbfs
+*.dbc
+
+# Environment variables
+.env
+.env.local
+*.env
+
+# Power BI
+*.pbix.tmp
+~$*.pbix
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+
+# Credentials
+credentials.json
+secrets.yaml
+config.local.yaml
+*.key
+*.pem
+
+# Logs
+*.log
+logs/
+
+.databricks
+
+.databricks
+
+.databricks
+
+.databricks
+
+.databricks
