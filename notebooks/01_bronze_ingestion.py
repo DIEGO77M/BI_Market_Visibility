@@ -59,15 +59,14 @@ from delta.tables import DeltaTable
 from datetime import datetime
 import os
 import pandas as pd
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Note: In Databricks, the SparkSession already exists as 'spark'
 # We cannot reconfigure it with .getOrCreate() to add Maven packages
-# Solution: Use pandas to read Excel, then convert to PySpark DataFrame
+# Solution: Use pandas to read Excel file-by-file, then convert to PySpark DataFrame
 
 print("✅ Spark session initialized")
 print(f"Spark Version: {spark.version}")
-print("📦 Using pandas + openpyxl for Excel file reading (parallelized)")
+print("📦 Using pandas + openpyxl for Excel (file-by-file processing)")
 
 # COMMAND ----------
 
@@ -140,15 +139,14 @@ print(f"  {BRONZE_SELL_IN}")
 
 # COMMAND ----------
 
-def read_excel_files(path_pattern, spark_session, max_workers=4):
+def read_excel_files(path_pattern, spark_session):
     """
-    Read Excel files using pandas with parallel processing and convert to PySpark DataFrame.
-    Workaround for Databricks environments where spark-excel cannot be configured.
+    Read Excel files one-by-one, convert to Spark immediately, then union.
+    Optimized for low memory footprint and better scalability.
     
     Args:
         path_pattern: Path pattern to Excel files (supports wildcards)
         spark_session: Active SparkSession
-        max_workers: Number of parallel threads (default: 4)
         
     Returns:
         PySpark DataFrame with combined data from all matching files
@@ -156,52 +154,38 @@ def read_excel_files(path_pattern, spark_session, max_workers=4):
     import glob
     from pyspark.sql import DataFrame
     
-    # Convert Volumes path to local file system path for pandas
-    # In Databricks, /Volumes/ paths can be accessed directly
-    local_path = path_pattern.replace("/Volumes/", "/Volumes/")
-    
     # Find all matching Excel files
+    local_path = path_pattern.replace("/Volumes/", "/Volumes/")
     excel_files = glob.glob(local_path)
     
     if not excel_files:
         raise FileNotFoundError(f"No Excel files found at: {path_pattern}")
     
     print(f"📂 Found {len(excel_files)} Excel file(s)")
-    print(f"⚡ Using {max_workers} parallel threads for processing")
+    print(f"⚡ Processing file-by-file to minimize memory usage")
     
-    def read_single_excel(file_path):
-        """Helper function to read a single Excel file"""
+    # Process files one by one
+    spark_dfs = []
+    for file_path in excel_files:
+        # Read single file with pandas
         df_pandas = pd.read_excel(file_path, engine='openpyxl')
-        df_pandas['_file_path'] = file_path
-        return df_pandas
-    
-    # Read Excel files in parallel
-    dfs_pandas = []
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all tasks
-        future_to_file = {executor.submit(read_single_excel, file): file for file in excel_files}
+        df_pandas['_metadata_file_path'] = file_path
         
-        # Collect results as they complete
-        for future in as_completed(future_to_file):
-            file_path = future_to_file[future]
-            try:
-                df = future.result()
-                dfs_pandas.append(df)
-                print(f"   ✓ Read: {os.path.basename(file_path)}")
-            except Exception as exc:
-                print(f"   ✗ Error reading {file_path}: {exc}")
-                raise
+        # Convert to Spark immediately (releases pandas memory)
+        df_spark = spark_session.createDataFrame(df_pandas)
+        spark_dfs.append(df_spark)
+        
+        print(f"   ✓ {os.path.basename(file_path)}")
+        
+        # Clear pandas DataFrame from memory
+        del df_pandas
     
-    # Combine all dataframes
-    combined_df_pandas = pd.concat(dfs_pandas, ignore_index=True)
+    # Union all Spark DataFrames
+    combined_df = spark_dfs[0]
+    for df in spark_dfs[1:]:
+        combined_df = combined_df.unionByName(df, allowMissingColumns=True)
     
-    # Convert to PySpark DataFrame
-    df_spark = spark_session.createDataFrame(combined_df_pandas)
-    
-    # Rename metadata column to match Unity Catalog pattern
-    df_spark = df_spark.withColumnRenamed("_file_path", "_metadata_file_path")
-    
-    return df_spark
+    return combined_df
 
 
 def add_audit_columns(df):
@@ -248,42 +232,39 @@ def print_ingestion_summary(df, source_name):
     print(f"{'='*60}\n")
 
 
-def validate_data_quality(df, source_name, key_columns):
+def validate_data_quality(df, source_name):
     """
-    Perform basic data quality checks.
+    Perform MINIMAL data quality checks for Bronze layer.
+    Heavy validations moved to Silver layer for better performance.
     
     Args:
         df: DataFrame to validate
         source_name: Name of the data source
-        key_columns: List of key columns to check for nulls
-        
-    Returns:
-        Boolean indicating if validation passed
     """
-    print(f"\n🔍 Data Quality Validation: {source_name}")
+    print(f"\n🔍 Basic Quality Check: {source_name}")
     print("-" * 50)
     
-    # Check for null values in key columns
-    null_checks = []
-    for column in key_columns:
-        null_count = df.filter(col(column).isNull()).count()
-        null_pct = (null_count / df.count() * 100) if df.count() > 0 else 0
-        status = "✅ PASS" if null_count == 0 else f"⚠️ WARN ({null_pct:.2f}%)"
-        print(f"  {column}: {null_count:,} nulls - {status}")
-        null_checks.append(null_count == 0)
-    
-    # Check for duplicates
     total_rows = df.count()
-    distinct_rows = df.dropDuplicates(key_columns).count()
-    duplicate_count = total_rows - distinct_rows
-    dup_status = "✅ PASS" if duplicate_count == 0 else f"⚠️ WARN ({duplicate_count:,} duplicates)"
-    print(f"  Duplicates: {dup_status}")
+    print(f"  ✓ Total rows: {total_rows:,}")
+    
+    # Simple null summary (no detailed checks per column - too slow)
+    null_summary = []
+    for column in df.columns:
+        if column.startswith('_metadata') or column in ['ingestion_timestamp', 'source_file', 'ingestion_date', 'year', 'year_month']:
+            continue  # Skip audit/partition columns
+        null_count = df.filter(col(column).isNull()).count()
+        if null_count > 0:
+            null_pct = (null_count / total_rows * 100)
+            null_summary.append(f"{column} ({null_pct:.1f}%)")
+    
+    if null_summary:
+        print(f"  ⚠️  Nulls in: {', '.join(null_summary[:3])}")
+        if len(null_summary) > 3:
+            print(f"     ... and {len(null_summary)-3} more")
+    else:
+        print(f"  ✓ No nulls detected")
     
     print("-" * 50)
-    
-    # Overall validation result
-    validation_passed = all(null_checks) and duplicate_count == 0
-    return validation_passed
 
 # COMMAND ----------
 
@@ -313,12 +294,17 @@ df_master_pdv = spark.read.csv(
 # Add audit columns
 df_master_pdv = add_audit_columns(df_master_pdv)
 
+# Cache before multiple actions (summary + validation + write)
+df_master_pdv.cache()
+
 # Print summary
 print_ingestion_summary(df_master_pdv, "Master_PDV")
 
-# Validate data quality (using 'Code (eLeader)' as primary key)
-key_columns_pdv = ["Code (eLeader)"]
-validate_data_quality(df_master_pdv, "Master_PDV", key_columns_pdv)
+# Validate data quality
+validate_data_quality(df_master_pdv, "Master_PDV")
+
+# Coalesce to control file count before write
+df_master_pdv = df_master_pdv.coalesce(1)
 
 # Write to Bronze layer (Full Overwrite) - Unity Catalog Managed Table
 df_master_pdv.write \
@@ -420,12 +406,20 @@ else:
         .withColumn("file_name", col("_metadata.file_name")) \
         .withColumn("year_month", lit("2021-01"))  # Default, will be overridden by actual filename parsing
 
+# Add audit columns
+df_price_audit = add_audit_columns(df_price_audit)
+
+# Cache before multiple actions
+df_price_audit.cache()
+
 # Print summary
 print_ingestion_summary(df_price_audit, "Price_Audit")
 
-# Validate data quality - use first 2 columns as composite key
-key_columns_price = df_price_audit.columns[:2]
-validate_data_quality(df_price_audit, "Price_Audit", key_columns_price)
+# Validate data quality
+validate_data_quality(df_price_audit, "Price_Audit")
+
+# Coalesce to reduce small files (24 Excel → ~4-6 output files)
+df_price_audit = df_price_audit.coalesce(6)
 
 # Write to Bronze layer (Incremental Append with Partitioning) - Unity Catalog
 df_price_audit.write \
@@ -463,6 +457,9 @@ df_sell_in = read_excel_files(f"{SELL_IN_PATH}/*.xlsx", spark)
 # Add audit columns
 df_sell_in = add_audit_columns(df_sell_in)
 
+# Cache before multiple actions
+df_sell_in.cache()
+
 # Extract year for partitioning
 # Check for date or year columns (case insensitive)
 year_column = None
@@ -489,9 +486,11 @@ else:
 # Print summary
 print_ingestion_summary(df_sell_in, "Sell-In")
 
-# Validate data quality - use first 2 columns as composite key
-key_columns_sellin = [df_sell_in.columns[0], "year"]
-validate_data_quality(df_sell_in, "Sell-In", key_columns_sellin)
+# Validate data quality
+validate_data_quality(df_sell_in, "Sell-In")
+
+# Coalesce to control file count
+df_sell_in = df_sell_in.coalesce(2)
 
 # Write to Bronze layer using Dynamic Partition Overwrite (much faster than MERGE)
 # This strategy overwrites only the partitions present in the incoming data
