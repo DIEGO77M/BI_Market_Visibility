@@ -47,6 +47,8 @@ env/
 # Keep small raw data samples for portfolio demonstration
 !data/raw/**/master_pdv_raw.csv
 !data/raw/**/product_master_raw.csv
+!data/raw/Price_Audit/*.xlsx
+!data/raw/Sell-In/*.xlsx
 
 # Exclude processed data folders content but keep structure
 data/bronze/**
