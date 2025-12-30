@@ -8,53 +8,40 @@
 
 ## Overview
 
-This document captures **real challenges encountered** during Bronze layer implementation and their solutions. These issues represent common scenarios in enterprise data engineering projects.
+This document captures **technical challenges** encountered during Bronze layer implementation. These represent common configuration issues and data quality problems in enterprise data engineering.
 
 ---
 
 ## 🔴 Critical Issues Resolved
 
-### Issue #1: File Access Denied in Databricks Workspace
+### Issue #1: DBFS Public Access Disabled
 
 **Error:**
 ```
-[FAILED_READ_FILE.NO_HINT] Error while reading file 
-dbfs:/Workspace/Users/.../master_pdv_raw.csv
+[FAILED_READ_FILE] Error while reading file dbfs:/...
+Public DBFS root is disabled. Access is denied.
 ```
 
 **Root Cause:**
-- Attempted to read from `/Workspace/` paths directly
-- Databricks workspace paths are not accessible via DBFS protocol
-- Public DBFS root is disabled for security in the workspace
+- Databricks workspace has DBFS public access disabled for security
+- Cannot use traditional `dbfs:/FileStore/` paths
+- Legacy DBFS approach no longer supported in modern workspaces
 
-**Solution Attempted #1 (Failed):**
-- Added `file://` prefix to workspace paths
-- Error: `SecurityException: Cannot use WorkspaceLocalFileSystem - local filesystem access is forbidden`
-
-**Solution Attempted #2 (Failed):**
-- Tried to use `/FileStore/` in DBFS
-- Error: `Public DBFS root is disabled`
-
-**Final Solution (Success):**
-- Migrated to **Unity Catalog Volumes** (modern enterprise approach)
+**Solution:**
+- Use **Unity Catalog Volumes** (modern standard)
 - Created volume: `workspace.default.bi_market_raw`
-- Uploaded files to: `/Volumes/workspace/default/bi_market_raw/`
-- **Key Learning:** Unity Catalog Volumes is the professional standard for file storage in Databricks
+- Organized files: `/Volumes/workspace/default/bi_market_raw/Master_PDV/`
 
-**Code Fix:**
+**Code:**
 ```python
-# ❌ Old approach (workspace paths)
-BASE_PATH = "/Workspace/Users/.../files"
-
-# ✅ New approach (Unity Catalog Volumes)
 RAW_VOLUME = "/Volumes/workspace/default/bi_market_raw"
 MASTER_PDV_PATH = f"{RAW_VOLUME}/Master_PDV/master_pdv_raw.csv"
 ```
 
-**Prevention:**
-- Always use Unity Catalog Volumes for data files in production
-- Reserve workspace paths only for notebooks and code
-- Check workspace security settings before architecting storage
+**Key Learning:**
+- Unity Catalog Volumes is required in secured Databricks environments
+- Provides better governance, lineage, and access control
+- Standard approach for modern data platforms
 
 ---
 
@@ -68,27 +55,18 @@ Please use _metadata.file_path instead.
 ```
 
 **Root Cause:**
-- Legacy PySpark function `input_file_name()` not supported in Unity Catalog
-- Unity Catalog has stricter governance and requires new metadata access patterns
+- Unity Catalog requires updated metadata access patterns
+- Legacy `input_file_name()` function deprecated
 
 **Solution:**
 ```python
-# ❌ Old (legacy PySpark)
-.withColumn("source_file", input_file_name())
-
-# ✅ New (Unity Catalog compatible)
+# ✅ Unity Catalog compatible
 .withColumn("source_file", col("_metadata.file_path"))
 ```
 
 **Key Learning:**
-- Unity Catalog introduces breaking changes for better governance
-- Always check Unity Catalog compatibility for PySpark functions
-- Use `_metadata` pseudo-column for file metadata in UC
-
-**Prevention:**
-- Review Databricks Unity Catalog migration guide
-- Test with Unity Catalog enabled from the start
-- Avoid deprecated functions in new projects
+- Unity Catalog introduces breaking changes for governance
+- Always use `_metadata` pseudo-column for file metadata
 
 ---
 
@@ -97,150 +75,102 @@ Please use _metadata.file_path instead.
 **Error:**
 ```
 [DELTA_INVALID_CHARACTERS_IN_COLUMN_NAMES] 
-Found invalid character(s) among ' ,;{}()\n\t=' in the column names.
-Invalid column names: Code (eLeader); Store Name; Sales Rep.
+Found invalid character(s) among ' ,;{}()\n\t=' in column names.
+Invalid: Code (eLeader); Store Name; Sales Rep.
 ```
 
 **Root Cause:**
-- Raw CSV files contain column names with:
-  - Spaces: `Store Name`
-  - Parentheses: `Code (eLeader)`
-  - Periods: `Sales Rep.`
-  - Semicolons in data (not actual column names)
-- Delta Lake's default mode doesn't allow these characters
+- Source CSV contains columns with spaces, parentheses, periods
+- Delta Lake default mode doesn't allow these characters
 
 **Solution:**
-- Enabled **Column Mapping** feature in Delta Lake
-- Applied to all table writes
-
 ```python
 df.write \
-    .format("delta") \
-    .mode("overwrite") \
-    .option("delta.columnMapping.mode", "name") \  # KEY FIX
+    .option("delta.columnMapping.mode", "name") \
     .saveAsTable(table_name)
 ```
 
 **Key Learning:**
-- Bronze layer should preserve raw column names (minimal transformation)
-- Column Mapping allows special characters without breaking Delta
-- Alternative: Sanitize column names (loses traceability to source)
-
-**Prevention:**
-- Enable Column Mapping from the start for raw data ingestion
-- Document original vs. sanitized column names if renaming
-- Consider data contracts with source systems for clean column names
+- Bronze layer should preserve raw column names
+- Column Mapping allows special characters without data loss
+- Essential for maintaining traceability to source systems
 
 ---
 
-### Issue #4: Column Name Too Long
+### Issue #4: Incorrect CSV Delimiter
 
 **Error:**
 ```
-AnalysisException: Invalid input: Field managedcatalog.ColumnInfo.name: 
-At columns.0: name "Code (eLeader);Store Name;Channel;..." too long. 
+AnalysisException: name "Code (eLeader);Store Name;Channel..." too long. 
 Maximum length is 255 characters.
 ```
 
 **Root Cause:**
-- CSV was being read with **wrong delimiter**
-- Master_PDV uses semicolon (`;`) as delimiter, not comma
-- Spark treated entire header row as single column name (exceeded 255 char limit)
-
-**Investigation Process:**
-1. Checked raw CSV file structure
-2. Identified delimiter: `Code (eLeader);Store Name;Channel;...`
-3. Realized semicolon is field separator, not data
+- Master_PDV uses semicolon (`;`) delimiter, not comma
+- Default Spark CSV reader assumes comma
+- Entire header row parsed as single column name
 
 **Solution:**
 ```python
-# ❌ Wrong (default comma delimiter)
-spark.read.csv(path, header=True)
-
-# ✅ Correct (explicit semicolon delimiter)
-spark.read.csv(path, header=True, sep=";")
+spark.read.csv(path, header=True, sep=";")  # Explicit delimiter
 ```
 
 **Key Learning:**
-- **Never assume CSV delimiter** - always verify source files
+- Never assume CSV delimiter - always verify source files
 - Common delimiters: `,` (US), `;` (Europe/Latin America), `|`, `\t`
-- File extension `.csv` doesn't guarantee comma delimiter
-
-**Prevention:**
-- Document delimiter for each source in data dictionary
-- Add delimiter validation in data quality checks
-- Use `spark.read.option("sep", ";")` explicitly, never rely on defaults
+- Document delimiter in data dictionary
 
 ---
 
-## ⚠️ Moderate Issues
+### Issue #5: Excel File Reading in Databricks
 
-### Issue #5: Missing spark-excel Library
+**Challenge:**
+- Excel files require external library support
+- Databricks Community/Standard workspaces don't allow cluster Maven configuration
+- `spark-excel` requires cluster-level installation
 
-**Error:**
-```
-[DATA_SOURCE_NOT_FOUND] Failed to find the data source: com.crealytics.spark.excel. 
-Make sure the provider name is correct and the package is properly registered.
-```
-
-**Root Cause:**
-- Excel files require external library `spark-excel`
-- It's a **JVM/Maven library**, not a Python package
-- Cannot be installed with `pip` (common mistake)
-- Library not included by default in Databricks clusters
-
-**Failed Solution (Common Mistake):**
+**Solution:**
 ```python
-# ❌ WRONG - spark-excel doesn't exist in PyPI
-%pip install spark-excel
-# Error: Could not find a version that satisfies the requirement spark-excel
+# Use pandas + openpyxl (Python libraries)
+%pip install openpyxl pandas
+
+def read_excel_files(path_pattern, spark_session):
+    excel_files = glob.glob(path_pattern)
+    dfs_pandas = [pd.read_excel(f, engine='openpyxl') for f in excel_files]
+    combined_df = pd.concat(dfs_pandas, ignore_index=True)
+    return spark_session.createDataFrame(combined_df)
 ```
-
-**Solution #1 - Spark Session Configuration (Recommended for Notebooks):**
-```python
-# ✅ CORRECT - Use Maven coordinates
-spark = SparkSession.builder \
-    .config("spark.jars.packages", "com.crealytics:spark-excel_2.12:3.3.1_0.18.5") \
-    .getOrCreate()
-```
-
-**Solution #2 - Cluster-level Installation (Recommended for Production):**
-1. Go to Databricks cluster configuration
-2. Navigate to "Libraries" tab
-3. Click "Install New"
-4. Select **"Maven"** (not PyPI)
-5. Enter: `com.crealytics:spark-excel_2.12:3.3.1_0.18.5`
-6. Install and restart cluster
-
-**Solution #3 - Init Script (Enterprise Approach):**
-```bash
-#!/bin/bash
-# cluster-init.sh
-/databricks/spark/bin/spark-shell --packages com.crealytics:spark-excel_2.12:3.3.1_0.18.5
-```
-
-**Implemented Solution:**
-- Spark session config with Maven coordinates
-- Downloads JAR automatically on first run
-- No cluster restart required
-- Works in notebooks and jobs
 
 **Key Learning:**
-- **pip is for Python packages** (PyPI)
-- **Maven is for JVM libraries** (Scala/Java)
-- Excel support requires JVM library (Spark is Scala-based)
-- Check package registry before attempting installation
-- Maven coordinates format: `groupId:artifactId_scalaVersion:version`
-
-**Prevention:**
-- Document library type (Python vs JVM) in dependencies
-- Use cluster libraries for production (not session config)
-- Consider converting Excel to Parquet/Delta at source
-- Excel is not recommended for big data pipelines
+- Python libraries (pip) can be installed in notebooks
+- Pandas suitable for files <1GB (acceptable for most Bronze ingestion)
+- Maintains file lineage via metadata columns
 
 ---
 
-### Issue #6: Schema Inference with Special Characters
+### Issue #6: Dynamic Schema Handling
+
+**Challenge:**
+- Source systems use different column naming conventions
+- Hardcoded column names break when schemas change
+- Case sensitivity varies across sources
+
+**Solution:**
+```python
+# Dynamic date column detection (case-insensitive)
+date_column = None
+for col_name in df.columns:
+    if 'date' in col_name.lower() or 'fecha' in col_name.lower():
+        date_column = col_name
+        break
+```
+
+**Key Learning:**
+- Bronze layer must handle schema variability
+- Use dynamic column detection for robustness
+- Support multiple languages (date/fecha, product/producto)
+
+---
 
 **Challenge:**
 - `inferSchema=True` sometimes misinterprets columns with special chars
@@ -275,216 +205,55 @@ df = spark.read \
 
 ---
 
-### Issue #7: Dynamic Column Detection
+## 🛠️ Best Practices Implemented
 
-**Challenge:**
-- Hardcoded column names fail when source schema changes
-- Different sources have different naming conventions (case, spaces)
-
-**Solution - Dynamic Key Column Detection:**
+### 1. Unity Catalog Volumes for File Storage
 ```python
-# ❌ Hardcoded (brittle)
-key_columns = ["product_id", "pdv_id"]
-
-# ✅ Dynamic (robust)
-# Find date column (case-insensitive)
-date_column = None
-for col_name in df.columns:
-    if 'date' in col_name.lower() or 'fecha' in col_name.lower():
-        date_column = col_name
-        break
-
-# Use actual first column as key
-key_columns = [df.columns[0], "year"]
+RAW_VOLUME = "/Volumes/workspace/default/bi_market_raw"
 ```
 
-**Key Learning:**
-- Bronze layer must handle schema variability
-- Use dynamic column detection for flexibility
-- Log actual detected columns for troubleshooting
-
----
-
-### Issue #7: File Path Organization
-
-**Challenge:**
-- Files uploaded to volume root without folder structure
-- Difficult to manage multiple sources
-- Path inconsistencies between local and Databricks
-
-**Solution - Proper Folder Structure:**
-```
-/Volumes/workspace/default/bi_market_raw/
-├── Master_PDV/
-│   └── master_pdv_raw.csv
-├── Master_Products/
-│   └── product_master_raw.csv
-├── Price_Audit/
-│   ├── Price_Audit_2021_01.xlsx
-│   └── ... (24 files)
-└── Sell-In/
-    ├── Sell_In_2021.xlsx
-    └── Sell_In_2022.xlsx
-```
-
-**Key Learning:**
-- Organize by data source, not by file type
-- Mirror source system structure in Bronze
-- Maintain consistent structure between environments
-
----
-
-## 🛠️ Best Practices Learned
-
-### 1. Path Configuration Strategy
-
-**Problem:** Hardcoded paths break across environments
-
-**Solution:**
+### 2. Delta Column Mapping
 ```python
-# Environment-aware path configuration
-CATALOG = "workspace"
-SCHEMA = "default"
-RAW_VOLUME = f"/Volumes/{CATALOG}/{SCHEMA}/bi_market_raw"
-
-# Source-specific paths
-MASTER_PDV_PATH = f"{RAW_VOLUME}/Master_PDV/master_pdv_raw.csv"
+.option("delta.columnMapping.mode", "name")
 ```
 
-**Benefits:**
-- Easy to switch between dev/staging/prod
-- Single source of truth for paths
-- Clear separation of concerns
-
----
-
-### 2. Unity Catalog Table Naming
-
-**Problem:** Inconsistent table references cause errors
-
-**Solution:**
+### 3. Explicit CSV Delimiters
 ```python
-# ❌ Path-based (legacy)
-.save("/path/to/table")
-deltaTable = DeltaTable.forPath(spark, path)
-
-# ✅ Name-based (Unity Catalog)
-.saveAsTable("catalog.schema.table")
-deltaTable = DeltaTable.forName(spark, "catalog.schema.table")
+spark.read.csv(path, sep=";")
 ```
 
-**Benefits:**
-- Centralized metadata management
-- Built-in governance and lineage
-- Multi-cloud compatibility
-
----
-
-### 3. Audit Columns for Traceability
-
-**Implementation:**
+### 4. Dynamic Column Detection
 ```python
-def add_audit_columns(df):
-    return df \
-        .withColumn("ingestion_timestamp", current_timestamp()) \
-        .withColumn("source_file", col("_metadata.file_path")) \
-        .withColumn("ingestion_date", lit(datetime.now().strftime("%Y-%m-%d")))
+date_col = next((c for c in df.columns if 'date' in c.lower()), None)
 ```
 
-**Benefits:**
-- Track when and where data came from
-- Debug data issues faster
-- Enable time-travel queries
-- Audit compliance
-
----
-
-### 4. Data Quality Checks Before Write
-
-**Implementation:**
+### 5. Audit Columns
 ```python
-def validate_data_quality(df, source_name, key_columns):
-    # Check for nulls in keys
-    # Check for duplicates
-    # Log warnings (don't fail - Bronze is raw data)
-    pass
+.withColumn("ingestion_timestamp", current_timestamp())
+.withColumn("source_file", col("_metadata.file_path"))
 ```
 
-**Benefits:**
-- Early detection of data issues
-- Visibility into source data quality
-- Documentation of known issues
-
 ---
 
-## 📚 Key Takeaways
+## 🔍 Configuration Checklist
 
-### For Bronze Layer Development:
-
-1. **Storage:**
-   - ✅ Use Unity Catalog Volumes
-   - ❌ Avoid workspace paths or legacy DBFS
-
-2. **Schema Handling:**
-   - ✅ Enable Column Mapping for raw data
-   - ✅ Use dynamic column detection
-   - ❌ Don't hardcode column names
-
-3. **Delimiters:**
-   - ✅ Always verify and specify explicitly
-   - ✅ Document in data dictionary
-   - ❌ Never assume comma for CSV
-
-4. **Unity Catalog:**
-   - ✅ Use `saveAsTable()` for managed tables
-   - ✅ Use `_metadata` instead of `input_file_name()`
-   - ✅ Use `DeltaTable.forName()` not `forPath()`
-
-5. **File Organization:**
-   - ✅ Maintain clear folder structure
-   - ✅ Group by source system
-   - ✅ Mirror local and cloud structure
-
----
-
-## 🔍 Debugging Checklist
-
-When encountering issues, check:
-
-- [ ] File exists in correct Volume path (use `databricks fs ls`)
-- [ ] Delimiter is specified correctly for CSV
-- [ ] Unity Catalog compatibility of functions used
-- [ ] Column Mapping enabled for special characters
-- [ ] Table name uses full 3-level namespace (catalog.schema.table)
-- [ ] Schema inference working (print schema after read)
-- [ ] Audit columns added without errors
-- [ ] Network/permissions to access Databricks workspace
+- [ ] Unity Catalog Volume created
+- [ ] Files uploaded with folder structure
+- [ ] CSV delimiters verified
+- [ ] Column Mapping enabled
+- [ ] Python libraries installed (`openpyxl`, `pandas`)
+- [ ] Unity Catalog functions used
+- [ ] Audit columns added
 
 ---
 
 ## 📖 Related Documentation
 
-- [Development Setup Guide](DEVELOPMENT_SETUP.md) - Initial configuration
-- [Integration Architecture](INTEGRATION_ARCHITECTURE.md) - System overview
-- [Data Dictionary](data_dictionary.md) - Source schemas
-- [Quick Reference](QUICK_REFERENCE.md) - Common commands
-
----
-
-## 💡 Questions for Code Reviews
-
-When reviewing Bronze layer code, ask:
-
-1. Are Unity Catalog Volumes being used for file storage?
-2. Is Column Mapping enabled for raw data with special characters?
-3. Are CSV delimiters explicitly specified?
-4. Are column names dynamically detected instead of hardcoded?
-5. Are audit columns being added consistently?
-6. Is error handling appropriate for Bronze (log warnings, don't fail)?
-7. Are paths configurable across environments?
+- [Development Setup](DEVELOPMENT_SETUP.md)
+- [Integration Architecture](INTEGRATION_ARCHITECTURE.md)
+- [Data Dictionary](data_dictionary.md)
 
 ---
 
 **Last Updated:** 2025-12-30  
-**Status:** Active - reflects actual issues encountered during development  
-**Lessons Applied:** All solutions implemented in `notebooks/01_bronze_ingestion.py`
+**Status:** Production-ready
