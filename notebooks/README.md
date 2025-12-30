@@ -1,7 +1,5 @@
 # 📓 Databricks Notebooks
 
-> **Note:** These notebooks are in Databricks `.py` format (not `.ipynb`). Import them directly to Databricks Workspace or view the Python code on GitHub.
-
 ## 🎯 Medallion Architecture Implementation
 
 Execute notebooks in the following order:
@@ -32,19 +30,12 @@ Execute notebooks in the following order:
 **Key Features:**
 - Unity Catalog managed tables
 - Delta Lake with column mapping
-- File-by-file Excel processing (low memory)
+- File-by-file Excel processing (optimized memory usage)
 - Audit columns (ingestion_timestamp, source_file)
 - Dynamic partition overwrite
-- Metrics from Delta History (no count operations)
+- Performance metrics from Delta History
 
-**Runtime:** ~2-4 minutes (Serverless optimized)
-
-**Technical Highlights:**
-- ✅ Solved DBFS public access issue → Unity Catalog Volumes
-- ✅ CSV delimiter detection (semicolon vs comma)
-- ✅ Excel reading without spark-excel → pandas + openpyxl
-- ✅ Special characters in columns → Column Mapping enabled
-- ✅ 3x performance improvement with optimizations
+**Runtime:** ~2-4 minutes (Databricks Serverless)
 
 ---
 
@@ -72,12 +63,11 @@ Execute notebooks in the following order:
 5. **Derived columns** - unit_price, is_active_sale, year/month
 6. **Audit metadata** - processing_date, processing_timestamp
 
-**Architecture Compliance:**
-- ✅ Reads ONLY from Bronze Delta tables
-- ✅ No cache/persist (Serverless optimized)
-- ✅ ONE write action per table
-- ✅ No unnecessary count/show operations
-- ✅ Validation via Delta History
+**Best Practices:**
+- Reads ONLY from Bronze Delta tables
+- Serverless optimized (no cache/persist)
+- Single write action per table
+- Efficient validation via Delta History
 - ✅ No over-engineering (simple, explicit)
 
 **Runtime:** ~1-2 minutes
