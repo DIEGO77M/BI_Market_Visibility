@@ -7,6 +7,9 @@
 [![GitHub](https://img.shields.io/badge/GitHub-Repository-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/DIEGO77M/BI_Market_Visibility)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 
+[![CI/CD Pipeline](https://github.com/DIEGO77M/BI_Market_Visibility/actions/workflows/ci.yml/badge.svg)](https://github.com/DIEGO77M/BI_Market_Visibility/actions/workflows/ci.yml)
+[![Code Quality](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
 > End-to-end Business Intelligence solution implementing **Medallion Architecture** (Bronze-Silver-Gold) using **Databricks**, **PySpark**, and **Power BI** for market visibility analytics.
 
 ---
