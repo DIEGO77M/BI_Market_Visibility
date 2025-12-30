@@ -200,6 +200,210 @@ write_to_delta(df)
 **After Optimization:**
 ```python
 # ✅ Fast approach
+df = read_from_source()
+df.coalesce(1).write.format("delta").saveAsTable(table)  # One write action
+metrics = spark.sql(f"DESCRIBE HISTORY {table} LIMIT 1")  # Fast metrics
+```
+
+**Result:** 3x faster execution, stable memory usage
+
+### Data Lineage & Audit
+
+Every Bronze table includes:
+- `ingestion_timestamp` - When data was loaded
+- `source_file` - Original file path
+- `ingestion_date` - Date of ingestion
+
+### Next Steps
+→ Proceed to [Silver Layer](#-silver-layer---data-standardization--quality-) for data standardization
+
+---
+
+## 🥈 Silver Layer - Data Standardization & Quality ✅ COMPLETED
+
+### Overview
+Clean and standardize Bronze data with business rules and quality validations. Optimized for **Databricks Serverless** with strategic quality checks.
+
+### Transformation Strategy
+
+| Bronze Source | Silver Target | Key Transformations | Quality Checks |
+|--------------|---------------|---------------------|----------------|
+| **bronze_master_pdv** | **silver_master_pdv** | • Text standardization (trim, uppercase)<br>• Deduplication by PDV key<br>• Quality score calculation | • PDV_CODE validation<br>• Completeness checks |
+| **bronze_master_products** | **silver_master_products** | • Clean product names/codes<br>• Price validation (remove negatives)<br>• Deduplication by product key | • Price range validation<br>• Product key integrity |
+| **bronze_price_audit** | **silver_price_audit** | • Remove null critical fields<br>• Price rounding (2 decimals)<br>• Date standardization | • Price > 0 validation<br>• Date range checks |
+| **bronze_sell_in** | **silver_sell_in** | • Quantity/value cleaning<br>• Unit price calculation<br>• Business flags (has_sales) | • Quantity >= 0<br>• Value >= 0<br>• Derived metric validation |
+
+### Technical Implementation
+
+**Unity Catalog Tables Created:**
+```sql
+workspace.default.silver_master_pdv
+workspace.default.silver_master_products
+workspace.default.silver_price_audit  -- Partitioned by year_month
+workspace.default.silver_sell_in      -- Partitioned by year
+```
+
+**Key Features:**
+- ✅ **Read ONLY from Bronze Delta tables** (no raw file access)
+- ✅ **No cache/persist** (Serverless optimized)
+- ✅ **Strategic quality checks** (add business value, not exhaustive)
+- ✅ **One write per table** (single action pattern)
+- ✅ **Quality score calculation** (0-100 scale)
+- ✅ **Validation flags** (`*_is_valid` columns for critical fields)
+- ✅ **Silver metadata tracking** (processing_timestamp, version)
+
+### Serverless Best Practices Applied
+
+#### ✅ DO:
+```python
+# Read from Bronze Delta table
+df = spark.read.table("bronze_master_pdv")
+
+# Apply transformations
+df = df.withColumn("name", trim(upper(col("name"))))
+
+# Strategic quality checks
+df = df.withColumn("code_is_valid", when(col("code").isNull(), False).otherwise(True))
+
+# Single write action
+df.write.format("delta").mode("overwrite").saveAsTable("silver_master_pdv")
+```
+
+#### ❌ DON'T:
+```python
+# Don't re-ingest from raw
+df = spark.read.csv("/raw/file.csv")  # ❌
+
+# Don't use cache in Serverless
+df.cache()  # ❌
+
+# Don't count unnecessarily
+for col in df.columns:
+    print(df.filter(col(col).isNull()).count())  # ❌ Too slow
+
+# Don't over-engineer
+df.repartition(100).cache().checkpoint()  # ❌
+```
+
+### Data Quality Framework
+
+**Quality Score Calculation:**
+```python
+quality_score = (valid_checks / total_checks) * 100
+```
+
+Each Silver table includes:
+- `*_is_valid` columns for critical fields
+- `quality_score` (0-100) based on validation results
+- `processing_timestamp`, `silver_layer_version`, `processing_date`
+
+**Quality Validation Functions:**
+- `apply_quality_expectations()` - Add validation columns
+- `validate_silver_quality()` - Generate quality metrics
+- `check_silver_standards()` - Verify metadata compliance
+
+### Transformations by Table
+
+#### silver_master_pdv
+```python
+# Text standardization
+df = df.withColumn("pdv_name", trim(upper(col("pdv_name"))))
+
+# Deduplication (keep most recent)
+window = Window.partitionBy("pdv_code").orderBy(col("pdv_code"))
+df = df.withColumn("_row_num", row_number().over(window))
+df = df.filter(col("_row_num") == 1).drop("_row_num")
+```
+
+#### silver_master_products
+```python
+# Price validation
+df = df.withColumn(
+    "price",
+    when(col("price") < 0, None)  # Remove negatives
+    .when(col("price").isNull(), 0)  # Handle nulls
+    .otherwise(round(col("price"), 2))  # Round
+)
+```
+
+#### silver_sell_in
+```python
+# Calculate unit price
+df = df.withColumn(
+    "unit_price_calculated",
+    when((col("quantity") > 0) & (col("value") > 0),
+         round(col("value") / col("quantity"), 2))
+    .otherwise(None)
+)
+
+# Add business flag
+df = df.withColumn("has_sales", when(col("quantity") > 0, True).otherwise(False))
+```
+
+### Performance Optimizations
+
+**Efficient Quality Checks:**
+```python
+# ✅ Single aggregation for multiple metrics
+quality_stats = df.agg(
+    min("quality_score").alias("min_quality"),
+    max("quality_score").alias("max_quality"),
+    avg("quality_score").alias("avg_quality")
+).first()
+```
+
+**vs. Inefficient approach:**
+```python
+# ❌ Multiple count operations
+for col in df.columns:
+    null_count = df.filter(col(col).isNull()).count()  # Slow!
+    duplicate_count = df.groupBy(col).count().filter("count > 1").count()  # Very slow!
+```
+
+### Quality Metrics
+
+Silver layer quality validation includes:
+- **Quality Score:** Min/Max/Avg across all records
+- **Validation Columns:** `*_is_valid` flags for critical fields
+- **Metadata Compliance:** Required Silver columns present
+
+Example output:
+```
+🔍 Silver Quality Validation: Master_PDV
+------------------------------------------------------------
+  Quality Score (0-100):
+    Min: 85.00
+    Max: 100.00
+    Avg: 97.50
+  Validation Columns: 2
+    pdv_code_is_valid: 100.0% valid
+    pdv_name_is_valid: 95.0% valid
+------------------------------------------------------------
+```
+
+### Next Steps
+→ Proceed to Gold Layer for business aggregations and star schema modeling
+
+---
+
+## 🥇 Gold Layer - Analytics & Star Schema 🚧 IN PROGRESS
+
+### Planned Implementation
+
+**Star Schema Design:**
+- `fact_sales` - Daily sales transactions
+- `dim_pdv` - Point of sale dimension
+- `dim_product` - Product dimension
+- `dim_date` - Date dimension
+
+**Aggregated KPIs:**
+- Sales by PDV, Product, Region
+- Price variance analysis
+- Market penetration metrics
+
+---
+```python
+# ✅ Fast approach
 df = read_excel_file_by_file()  # Low memory
 df = add_audit_columns(df)
 df = df.coalesce(6)  # Control file count

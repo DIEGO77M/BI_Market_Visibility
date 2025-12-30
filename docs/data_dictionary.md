@@ -27,27 +27,146 @@ This document provides detailed information about all data entities, attributes,
 
 ## Silver Layer Tables
 
-### cleaned_[table_name]
+### silver_master_pdv
 
 | Column Name | Data Type | Description | Transformation | Nullable | Example |
 |-------------|-----------|-------------|----------------|----------|---------|
-| column_1 | string | [Description] | [Transformation applied] | Yes/No | [Sample value] |
-| column_2 | integer | [Description] | [Transformation applied] | Yes/No | [Sample value] |
-| updated_timestamp | timestamp | Last update timestamp | System | No | 2024-01-15 10:35:00 |
+| [PDV_KEY] | string | Point of sale code (standardized) | TRIM + UPPER | No | PDV001 |
+| [PDV_NAME] | string | Point of sale name (standardized) | TRIM + UPPER | No | SUPER MARKET ABC |
+| [Additional columns from source] | various | Preserved from Bronze | Standardized text | Varies | - |
+| [KEY]_is_valid | boolean | Validation flag for critical field | Quality check | No | true |
+| quality_score | double | Overall quality score (0-100) | (valid_checks/total)*100 | No | 97.5 |
+| processing_timestamp | timestamp | Silver processing time | System | No | 2025-12-30 10:35:00 |
+| silver_layer_version | string | Silver layer version | System | No | v1.0 |
+| processing_date | date | Processing date | System | No | 2025-12-30 |
 
-**Table Purpose:** [Describe the purpose and use case]
+**Table Purpose:** Standardized point-of-sale master data for analytics
 
 **Transformations Applied:**
-1. [Transformation 1]
-2. [Transformation 2]
+1. Text standardization (TRIM, UPPER) on all string columns
+2. Deduplication by PDV key (keep most recent)
+3. Quality validation flags added
+4. Quality score calculation
 
 **Data Quality Rules:**
-- Rule 1: [Description]
-- Rule 2: [Description]
+- PDV key must be unique
+- Critical text fields must not be null
+- All text standardized to uppercase
 
 **Validation Checks:**
-- Check 1: [Description]
-- Check 2: [Description]
+- PDV_CODE_is_valid: Validates non-null PDV code
+- quality_score: 0-100 scale based on all validation checks
+
+---
+
+### silver_master_products
+
+| Column Name | Data Type | Description | Transformation | Nullable | Example |
+|-------------|-----------|-------------|----------------|----------|---------|
+| [PRODUCT_KEY] | string | Product code (standardized) | TRIM + UPPER | No | PROD123 |
+| [PRODUCT_NAME] | string | Product name (standardized) | TRIM + UPPER | No | COFFEE 500G |
+| [PRICE_COLUMNS] | decimal(18,2) | Product prices (cleaned) | Remove negatives, round to 2 decimals | Yes | 12.50 |
+| [Additional columns] | various | Preserved from Bronze | Standardized | Varies | - |
+| [KEY]_is_valid | boolean | Validation flag | Quality check | No | true |
+| quality_score | double | Overall quality score (0-100) | Calculated | No | 98.0 |
+| processing_timestamp | timestamp | Silver processing time | System | No | 2025-12-30 10:35:00 |
+| silver_layer_version | string | Silver layer version | System | No | v1.0 |
+| processing_date | date | Processing date | System | No | 2025-12-30 |
+
+**Table Purpose:** Standardized product master data with clean prices
+
+**Transformations Applied:**
+1. Text standardization on product names and codes
+2. Price validation (remove negatives, handle nulls)
+3. Price rounding to 2 decimals
+4. Deduplication by product key
+5. Quality score calculation
+
+**Data Quality Rules:**
+- Product key must be unique
+- Prices must be >= 0 or null
+- All prices rounded to 2 decimals
+
+**Validation Checks:**
+- PRODUCT_CODE_is_valid: Validates non-null product code
+- Price validation: Removes negative values
+- quality_score: Overall data quality metric
+
+---
+
+### silver_price_audit
+
+| Column Name | Data Type | Description | Transformation | Nullable | Example |
+|-------------|-----------|-------------|----------------|----------|---------|
+| [PDV_KEY] | string | Point of sale code | From Bronze | No | PDV001 |
+| [PRODUCT_KEY] | string | Product code | From Bronze | No | PROD123 |
+| [PRICE_COLUMNS] | decimal(18,2) | Audited prices | Round to 2 decimals, remove negatives | Yes | 15.99 |
+| [DATE_COLUMNS] | date | Audit dates | Standardized | Yes | 2025-01-15 |
+| year_month | string | Partition column | From Bronze | No | 2025-01 |
+| [KEY]_is_valid | boolean | Validation flags | Quality check | No | true |
+| quality_score | double | Quality score (0-100) | Calculated | No | 99.0 |
+| processing_timestamp | timestamp | Processing time | System | No | 2025-12-30 10:35:00 |
+| silver_layer_version | string | Version | System | No | v1.0 |
+| processing_date | date | Processing date | System | No | 2025-12-30 |
+
+**Table Purpose:** Clean price audit data for price variance analysis
+
+**Transformations Applied:**
+1. Remove records with all null critical fields
+2. Price validation and rounding
+3. Date standardization
+4. Quality score calculation
+5. Filter out invalid records
+
+**Data Quality Rules:**
+- At least one critical field must be non-null
+- Prices must be positive or null
+- Records with all nulls removed
+
+**Validation Checks:**
+- Critical columns (PDV, Product, Price) validated
+- quality_score reflects overall completeness
+- Partitioned by year_month (preserved from Bronze)
+
+---
+
+### silver_sell_in
+
+| Column Name | Data Type | Description | Transformation | Nullable | Example |
+|-------------|-----------|-------------|----------------|----------|---------|
+| [PDV_KEY] | string | Point of sale code | From Bronze | No | PDV001 |
+| [PRODUCT_KEY] | string | Product code | From Bronze | No | PROD123 |
+| [QUANTITY_COLUMNS] | integer | Sales quantities | Clean (nulls→0, negatives→0) | No | 100 |
+| [VALUE_COLUMNS] | decimal(18,2) | Sales values | Clean, round to 2 decimals | No | 1250.00 |
+| unit_price_calculated | decimal(18,2) | Derived unit price | value / quantity | Yes | 12.50 |
+| has_sales | boolean | Sales flag | quantity > 0 | No | true |
+| year | integer | Partition column | From Bronze | No | 2025 |
+| [KEY]_is_valid | boolean | Validation flags | Quality check | No | true |
+| quality_score | double | Quality score (0-100) | Calculated | No | 100.0 |
+| processing_timestamp | timestamp | Processing time | System | No | 2025-12-30 10:35:00 |
+| silver_layer_version | string | Version | System | No | v1.0 |
+| processing_date | date | Processing date | System | No | 2025-12-30 |
+
+**Table Purpose:** Standardized sales transactions with derived metrics
+
+**Transformations Applied:**
+1. Quantity cleaning (nulls→0, negatives→0)
+2. Value cleaning and rounding
+3. Unit price calculation (derived metric)
+4. Business flag: has_sales
+5. Quality score calculation
+
+**Data Quality Rules:**
+- Quantities must be >= 0
+- Values must be >= 0
+- Unit price only calculated when both qty and value > 0
+
+**Validation Checks:**
+- QUANTITY_is_valid: Validates non-null quantity
+- VALUE_is_valid: Validates non-null value
+- has_sales: Business flag for records with actual sales
+- quality_score: Overall data quality
+- Partitioned by year (preserved from Bronze)
 
 ---
 
