@@ -145,9 +145,12 @@ pytest src/tests/
 
 ## 📚 Documentation
 
-- [Data Dictionary](docs/data_dictionary.md)
-- [Architecture Design](docs/architecture/README.md)
-- [Executive Summary](presentation/executive_summary.pptx)
+- **[Development Setup Guide](docs/DEVELOPMENT_SETUP.md)** - Complete guide for Databricks, VS Code, and GitHub integration
+- **[Integration Architecture](docs/INTEGRATION_ARCHITECTURE.md)** - Visual diagrams of system integration
+- **[Data Dictionary](docs/data_dictionary.md)** - Schema and field definitions
+- **[Architecture Design](docs/architecture/README.md)** - Medallion architecture details
+- **[Executive Summary](presentation/executive_summary.pptx)** - Business insights presentation
+- **[Contributing Guidelines](CONTRIBUTING.md)** - How to contribute to this project
 
 ## 🤝 Contributing
 
