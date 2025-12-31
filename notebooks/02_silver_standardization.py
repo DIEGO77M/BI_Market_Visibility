@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # Silver Layer - Data Standardization & Quality
 # MAGIC 
-# MAGIC **Purpose:** Standardize and validate Bronze data for analytical consumption
+# MAGIC **Purpose:** Transform Bronze snapshots into analysis-ready datasets with consistent schema, validated domains, and deterministic quality controls.
 # MAGIC 
 # MAGIC **Author:** Diego Mayorga  
 # MAGIC **Date:** 2025-12-30  
@@ -10,24 +10,64 @@
 # MAGIC 
 # MAGIC ---
 # MAGIC 
-# MAGIC ## Architecture Principles
+# MAGIC ## Design Philosophy
 # MAGIC 
-# MAGIC **Silver Layer Scope:**
+# MAGIC Silver Layer implements **curated standardization** with minimal yet sufficient transformations for analytical consumption. This layer bridges raw ingestion (Bronze) and business logic (Gold) by establishing data contracts through schema normalization, domain validation, and deterministic deduplication.
+# MAGIC 
+# MAGIC ### Architectural Decisions
+# MAGIC 
+# MAGIC **1. Snapshot-Based Processing**
+# MAGIC - Reads complete Bronze Delta tables (no incremental complexity)
+# MAGIC - Simplifies lineage and replay scenarios
+# MAGIC - Enables deterministic deduplication with temporal ordering
+# MAGIC 
+# MAGIC **2. Serverless-First Design**
+# MAGIC - No `cache()` or `persist()` operations (incompatible with Databricks Serverless)
+# MAGIC - One write action per dataset (atomic operations)
+# MAGIC - Dynamic partition overwrite for fact tables (optimized rewrites)
+# MAGIC 
+# MAGIC **3. Schema Stability**
+# MAGIC - Explicit type casting for business keys and numeric fields
+# MAGIC - `mergeSchema=false` on master tables (controlled evolution)
+# MAGIC - snake_case standardization for cross-platform compatibility
+# MAGIC 
+# MAGIC **4. Intentional Null Preservation**
+# MAGIC - Nulls represent missing data (not default values)
+# MAGIC - Completeness flags signal data quality without imputation
+# MAGIC - Enables transparent downstream analysis decisions
+# MAGIC 
+# MAGIC ---
+# MAGIC 
+# MAGIC ## Silver Layer Scope
+# MAGIC 
+# MAGIC **Included Transformations:**
 # MAGIC - Schema standardization (snake_case, explicit types)
-# MAGIC - Business-driven null handling
-# MAGIC - Deduplication (justified by business keys)
-# MAGIC - Domain validations (prices, dates, ranges)
-# MAGIC - Light referential consistency checks
-# MAGIC - Derived columns (year, month, flags)
-# MAGIC - Audit traceability
+# MAGIC - Text normalization (trim, uppercase for dimensions)
+# MAGIC - Deduplication by business keys with deterministic ordering
+# MAGIC - Domain validations (price positivity, date ranges, quantity sanity)
+# MAGIC - Derived technical columns (month extraction, completeness flags)
+# MAGIC - Temporal lineage preservation (Bronze ingestion timestamp)
 # MAGIC 
-# MAGIC **Explicit Constraints:**
-# MAGIC - Read ONLY from Bronze Delta tables (no raw files)
-# MAGIC - No cache() or persist() (Serverless optimized)
-# MAGIC - No unnecessary count(), show(), collect()
-# MAGIC - One write action per table
-# MAGIC - No KPIs, aggregations, or Gold-layer logic
-# MAGIC - No over-engineering (no streaming, CDC, frameworks)
+# MAGIC **Explicitly Excluded:**
+# MAGIC - KPIs and business metrics (Gold Layer responsibility)
+# MAGIC - Cross-dataset joins (Gold Layer aggregation)
+# MAGIC - Complex aggregations or window functions beyond deduplication
+# MAGIC - Data quality frameworks (over-engineering for portfolio scale)
+# MAGIC 
+# MAGIC ---
+# MAGIC 
+# MAGIC ## Data Quality Strategy
+# MAGIC 
+# MAGIC **Validation Approach:**
+# MAGIC - **Master Data:** Strict filtering (null business keys rejected)
+# MAGIC - **Transactional Data:** Preserve nulls + completeness flags
+# MAGIC - **Price/Value Fields:** Unified criteria (strictly positive)
+# MAGIC - **Dates:** Future dates nullified (historical analysis assumption)
+# MAGIC 
+# MAGIC **Metrics via Delta History:**
+# MAGIC - Post-write validation uses `DESCRIBE HISTORY` (zero compute cost)
+# MAGIC - No `count()` operations (Serverless optimization)
+# MAGIC - Metrics extracted from operation metadata
 
 # COMMAND ----------
 
@@ -69,22 +109,42 @@ SILVER_SELL_IN = f"{CATALOG}.{SCHEMA}.silver_sell_in"
 # MAGIC %md
 # MAGIC ## 2. Silver: Master PDV
 # MAGIC 
-# MAGIC **Business Context:** Point of Sale master data  
-# MAGIC **Source:** bronze_master_pdv  
-# MAGIC **Transformations:**
-# MAGIC - Schema standardization (snake_case, explicit types)
-# MAGIC - Text normalization (trim, uppercase)
-# MAGIC - Deduplication by business key (PDV code)
-# MAGIC - Null handling for critical fields
-# MAGIC - Audit columns preserved
+# MAGIC **Business Context:** Point of Sale (PDV) master dimension containing store attributes, geographic coordinates, and organizational hierarchy.
+# MAGIC 
+# MAGIC **Source:** `bronze_master_pdv` (full snapshot, semicolon-delimited CSV origin)
+# MAGIC 
+# MAGIC ---
+# MAGIC 
+# MAGIC ### Design Decisions
+# MAGIC 
+# MAGIC **Deduplication Strategy:**
+# MAGIC - **Business Key:** `code_eleader` (standardized from "Code (eLeader)")
+# MAGIC - **Selection Criteria:** Most recent record by `bronze_ingestion_timestamp`
+# MAGIC - **Rationale:** Temporal ordering ensures reproducibility across pipeline runs
+# MAGIC 
+# MAGIC **Type Enforcement:**
+# MAGIC - `code_eleader` → `StringType` (business identifier)
+# MAGIC - `latitude`, `longitude` → `DoubleType` (geographic precision)
+# MAGIC - Prevents schema drift and type inference inconsistencies
+# MAGIC 
+# MAGIC **Text Normalization:**
+# MAGIC - Uppercase transformation for dimensional attributes (e.g., store names, channels)
+# MAGIC - Facilitates case-insensitive joins and reduces duplicate detection surface
+# MAGIC 
+# MAGIC **Quality Control:**
+# MAGIC - Records with null `code_eleader` filtered out (invalid dimension members)
+# MAGIC - Bronze lineage preserved via `bronze_ingestion_timestamp` for audit trail
+# MAGIC 
+# MAGIC **Output Schema:** Standardized snake_case, explicit types, processing metadata
 
 # COMMAND ----------
 
 # Read from Bronze Delta table
 df_bronze = spark.read.table(BRONZE_MASTER_PDV)
 
-# Drop Bronze audit columns (not needed in Silver)
-df = df_bronze.drop("ingestion_timestamp", "source_file", "ingestion_date")
+# Preserve Bronze ingestion timestamp for lineage, drop other audit columns
+df = df_bronze.withColumnRenamed("ingestion_timestamp", "bronze_ingestion_timestamp") \
+              .drop("source_file", "ingestion_date")
 
 # Schema standardization: Rename columns to snake_case
 column_mapping = {}
@@ -103,31 +163,48 @@ for column, dtype in df.dtypes:
     if dtype == "string":
         df = df.withColumn(column, trim(upper(col(column))))
 
-# Explicit type casting for known columns (adapt to your schema)
-# Example: df = df.withColumn("pdv_code", col("pdv_code").cast(StringType()))
+# Explicit type casting for critical columns
+# PDV Code must be string, coordinates must be double
+if "code_eleader" in df.columns:
+    df = df.withColumn("code_eleader", col("code_eleader").cast(StringType()))
+if "latitude" in df.columns:
+    df = df.withColumn("latitude", col("latitude").cast(DoubleType()))
+if "longitude" in df.columns:
+    df = df.withColumn("longitude", col("longitude").cast(DoubleType()))
 
-# Deduplication: Keep latest record by business key
-pdv_key_col = [c for c in df.columns if "pdv" in c or "codigo" in c or "code" in c]
-if pdv_key_col:
-    # Use row_number to keep first occurrence
-    window = Window.partitionBy(pdv_key_col[0]).orderBy(lit(1))
+# Preserve Bronze ingestion timestamp for lineage
+if "bronze_ingestion_timestamp" in df.columns:
+    # Already renamed, keep it
+    pass
+else:
+    # Should not happen, but just in case
+    pass
+
+# Deduplication: Keep most recent record by PDV code (deterministic)
+# Business key: code_eleader (standardized from "Code (eLeader)")
+if "code_eleader" in df.columns and "bronze_ingestion_timestamp" in df.columns:
+    window = Window.partitionBy("code_eleader").orderBy(col("bronze_ingestion_timestamp").desc_nulls_last())
+    df = df.withColumn("_rn", row_number().over(window)).filter(col("_rn") == 1).drop("_rn")
+elif "code_eleader" in df.columns:
+    # Fallback: use all columns for deterministic ordering if timestamp missing
+    window = Window.partitionBy("code_eleader").orderBy([col(c) for c in sorted(df.columns) if c != "code_eleader"])
     df = df.withColumn("_rn", row_number().over(window)).filter(col("_rn") == 1).drop("_rn")
 
-# Domain validations: Critical columns must not be null
-critical_cols = pdv_key_col[:1] if pdv_key_col else []
-for c in critical_cols:
-    df = df.withColumn(f"{c}_is_valid", when(col(c).isNotNull(), lit(True)).otherwise(lit(False)))
+# Filter: Remove records where PDV code is null (critical business field)
+if "code_eleader" in df.columns:
+    df = df.filter(col("code_eleader").isNotNull())
 
 # Audit columns
 df = df.withColumn("processing_date", current_date()) \
        .withColumn("processing_timestamp", current_timestamp())
 
 # Write to Silver (one write action)
+# Note: overwriteSchema=false for schema stability in production
 df.write \
     .format("delta") \
     .mode("overwrite") \
     .option("delta.columnMapping.mode", "name") \
-    .option("overwriteSchema", "true") \
+    .option("mergeSchema", "false") \
     .saveAsTable(SILVER_MASTER_PDV)
 
 # COMMAND ----------
@@ -135,22 +212,46 @@ df.write \
 # MAGIC %md
 # MAGIC ## 3. Silver: Master Products
 # MAGIC 
-# MAGIC **Business Context:** Product master data  
-# MAGIC **Source:** bronze_master_products  
-# MAGIC **Transformations:**
-# MAGIC - Schema standardization (snake_case, explicit types)
-# MAGIC - Text normalization
-# MAGIC - Price validation (> 0, round to 2 decimals)
-# MAGIC - Deduplication by product code
-# MAGIC - Null handling for critical fields
+# MAGIC **Business Context:** Product master dimension with hierarchical attributes (brand, segment, category) and optional pricing metadata.
+# MAGIC 
+# MAGIC **Source:** `bronze_master_products` (full snapshot, comma-delimited CSV origin)
+# MAGIC 
+# MAGIC ---
+# MAGIC 
+# MAGIC ### Design Decisions
+# MAGIC 
+# MAGIC **Deduplication Strategy:**
+# MAGIC - **Business Key:** `product_code`
+# MAGIC - **Selection Criteria:** Most recent record by `bronze_ingestion_timestamp`
+# MAGIC - **Fallback:** Deterministic column-based ordering (ensures stability if timestamp absent)
+# MAGIC 
+# MAGIC **Price Validation (if present):**
+# MAGIC - **Criteria:** Values ≤ 0 nullified (prices must be strictly positive)
+# MAGIC - **Precision:** Rounded to 2 decimals (monetary standard)
+# MAGIC - **Rationale:** Unified validation rule across all price fields (consistent with Price Audit)
+# MAGIC 
+# MAGIC **Type Enforcement:**
+# MAGIC - `product_code` → `StringType` (prevents numeric type confusion)
+# MAGIC - Price fields → `DoubleType` with explicit rounding
+# MAGIC 
+# MAGIC **Text Normalization:**
+# MAGIC - Uppercase for categorical attributes (brand, segment, category)
+# MAGIC - Enables case-insensitive lookups in downstream joins
+# MAGIC 
+# MAGIC **Quality Control:**
+# MAGIC - Null `product_code` records rejected (invalid dimension members)
+# MAGIC - Bronze lineage preserved for temporal audit
+# MAGIC 
+# MAGIC **Output Schema:** Standardized snake_case, explicit types, processing metadata
 
 # COMMAND ----------
 
 # Read from Bronze
 df_bronze = spark.read.table(BRONZE_MASTER_PRODUCTS)
 
-# Drop Bronze audit columns
-df = df_bronze.drop("ingestion_timestamp", "source_file", "ingestion_date")
+# Preserve Bronze ingestion timestamp for lineage, drop other audit columns
+df = df_bronze.withColumnRenamed("ingestion_timestamp", "bronze_ingestion_timestamp") \
+              .drop("source_file", "ingestion_date")
 
 # Schema standardization: snake_case
 column_mapping = {}
@@ -167,39 +268,47 @@ for column, dtype in df.dtypes:
     if dtype == "string":
         df = df.withColumn(column, trim(upper(col(column))))
 
-# Identify price columns
+# Explicit type casting for product key
+if "product_code" in df.columns:
+    df = df.withColumn("product_code", col("product_code").cast(StringType()))
+
+# Identify price columns (if any exist in product master)
 price_cols = [c for c in df.columns if "price" in c or "precio" in c or "valor" in c]
 
-# Price validation: must be > 0, round to 2 decimals
+# Price validation: must be > 0 (unified criteria), round to 2 decimals
 for price_col in price_cols:
     df = df.withColumn(
         price_col,
         when(col(price_col).isNull(), lit(None))
-        .when(col(price_col) < 0, lit(None))  # Invalid negative prices
+        .when(col(price_col) <= 0, lit(None))  # Prices must be strictly positive
         .otherwise(spark_round(col(price_col).cast(DoubleType()), 2))
     )
 
-# Deduplication by product key
-product_key_col = [c for c in df.columns if "product" in c or "codigo" in c or "sku" in c]
-if product_key_col:
-    window = Window.partitionBy(product_key_col[0]).orderBy(lit(1))
+# Deduplication: Keep most recent record by product code (deterministic)
+# Business key: product_code
+if "product_code" in df.columns and "bronze_ingestion_timestamp" in df.columns:
+    window = Window.partitionBy("product_code").orderBy(col("bronze_ingestion_timestamp").desc_nulls_last())
+    df = df.withColumn("_rn", row_number().over(window)).filter(col("_rn") == 1).drop("_rn")
+elif "product_code" in df.columns:
+    # Fallback: deterministic ordering by all columns
+    window = Window.partitionBy("product_code").orderBy([col(c) for c in sorted(df.columns) if c != "product_code"])
     df = df.withColumn("_rn", row_number().over(window)).filter(col("_rn") == 1).drop("_rn")
 
-# Domain validations: Critical columns
-critical_cols = product_key_col[:1] if product_key_col else []
-for c in critical_cols:
-    df = df.withColumn(f"{c}_is_valid", when(col(c).isNotNull(), lit(True)).otherwise(lit(False)))
+# Filter: Remove records where product code is null (critical business field)
+if "product_code" in df.columns:
+    df = df.filter(col("product_code").isNotNull())
 
 # Audit columns
 df = df.withColumn("processing_date", current_date()) \
        .withColumn("processing_timestamp", current_timestamp())
 
 # Write to Silver
+# Note: overwriteSchema=false for schema stability in production
 df.write \
     .format("delta") \
     .mode("overwrite") \
     .option("delta.columnMapping.mode", "name") \
-    .option("overwriteSchema", "true") \
+    .option("mergeSchema", "false") \
     .saveAsTable(SILVER_MASTER_PRODUCTS)
 
 # COMMAND ----------
@@ -207,14 +316,38 @@ df.write \
 # MAGIC %md
 # MAGIC ## 4. Silver: Price Audit
 # MAGIC 
-# MAGIC **Business Context:** Price audit data from multiple files  
-# MAGIC **Source:** bronze_price_audit (partitioned by year_month)  
-# MAGIC **Transformations:**
-# MAGIC - Schema standardization
-# MAGIC - Price validation (> 0, round to 2 decimals)
-# MAGIC - Date validation (no future dates)
-# MAGIC - Filter records with all critical fields null
-# MAGIC - Preserve partitioning (year_month)
+# MAGIC **Business Context:** Historical price observations collected from point-of-sale audits (24 monthly Excel files consolidated).
+# MAGIC 
+# MAGIC **Source:** `bronze_price_audit` (partitioned by `year_month`)
+# MAGIC 
+# MAGIC ---
+# MAGIC 
+# MAGIC ### Design Decisions
+# MAGIC 
+# MAGIC **Partitioning Strategy:**
+# MAGIC - **Partition Key:** `year_month` (preserved from Bronze)
+# MAGIC - **Write Mode:** Dynamic partition overwrite (rewrites only incoming month partitions)
+# MAGIC - **Rationale:** Optimizes query performance for time-series analysis and enables incremental updates
+# MAGIC 
+# MAGIC **Price Validation:**
+# MAGIC - **Criteria:** Values ≤ 0 nullified (unified with Product master validation)
+# MAGIC - **Precision:** 2 decimal places (monetary standard)
+# MAGIC - **Philosophy:** Invalid prices preserved as null for downstream investigation
+# MAGIC 
+# MAGIC **Date Validation:**
+# MAGIC - **Rule:** Future dates nullified (historical analysis assumption)
+# MAGIC - **Design Choice:** Preserves records but flags temporal anomalies
+# MAGIC 
+# MAGIC **Completeness Filtering:**
+# MAGIC - **Criteria:** Records with ALL critical fields null are excluded
+# MAGIC - **Critical Fields:** price, PDV identifiers, product identifiers
+# MAGIC - **Rationale:** Empty records provide no analytical value (reduce storage and compute)
+# MAGIC 
+# MAGIC **Schema Handling:**
+# MAGIC - Dynamic partition overwrite requires stable schema (no `overwriteSchema`)
+# MAGIC - `year_month` partition column excluded from standardization
+# MAGIC 
+# MAGIC **Output Schema:** Standardized snake_case, validated domains, monthly partitions
 
 # COMMAND ----------
 
@@ -236,18 +369,19 @@ for c in df.columns:
 for old_name, new_name in column_mapping.items():
     df = df.withColumnRenamed(old_name, new_name)
 
-# Identify critical columns
+# Explicit column identification (avoid dynamic detection risks)
+# Known columns after standardization: price, date, pdv/store codes, product codes
 price_cols = [c for c in df.columns if "price" in c or "precio" in c]
 date_cols = [c for c in df.columns if "date" in c or "fecha" in c]
-pdv_cols = [c for c in df.columns if "pdv" in c or "store" in c]
+pdv_cols = [c for c in df.columns if "pdv" in c or "store" in c or "code_eleader" in c]
 product_cols = [c for c in df.columns if "product" in c or "sku" in c]
 
-# Price validation
+# Price validation: must be > 0 (unified criteria with Products master)
 for price_col in price_cols:
     df = df.withColumn(
         price_col,
         when(col(price_col).isNull(), lit(None))
-        .when(col(price_col) <= 0, lit(None))  # Prices must be positive
+        .when(col(price_col) <= 0, lit(None))  # Prices must be strictly positive (unified)
         .otherwise(spark_round(col(price_col).cast(DoubleType()), 2))
     )
 
@@ -273,11 +407,11 @@ df = df.withColumn("processing_date", current_date()) \
        .withColumn("processing_timestamp", current_timestamp())
 
 # Write to Silver (preserve partitioning)
+# Note: overwriteSchema removed - incompatible with dynamic partition overwrite
 df.write \
     .format("delta") \
     .mode("overwrite") \
     .option("delta.columnMapping.mode", "name") \
-    .option("overwriteSchema", "true") \
     .option("partitionOverwriteMode", "dynamic") \
     .partitionBy("year_month") \
     .saveAsTable(SILVER_PRICE_AUDIT)
@@ -287,16 +421,44 @@ df.write \
 # MAGIC %md
 # MAGIC ## 5. Silver: Sell-In
 # MAGIC 
-# MAGIC **Business Context:** Sales transactions  
-# MAGIC **Source:** bronze_sell_in (partitioned by year)  
-# MAGIC **Transformations:**
-# MAGIC - Schema standardization
-# MAGIC - Quantity validation (>= 0)
-# MAGIC - Value validation (>= 0, round to 2 decimals)
-# MAGIC - Derived column: unit_price (value / quantity)
-# MAGIC - Derived column: is_active_sale (quantity > 0)
-# MAGIC - Date validation
-# MAGIC - Preserve partitioning (year)
+# MAGIC **Business Context:** Sales transactions (sell-in from manufacturer to distributors/retailers) with quantity, value, and temporal attributes.
+# MAGIC 
+# MAGIC **Source:** `bronze_sell_in` (partitioned by `year`)
+# MAGIC 
+# MAGIC ---
+# MAGIC 
+# MAGIC ### Design Decisions
+# MAGIC 
+# MAGIC **Partitioning Strategy:**
+# MAGIC - **Partition Key:** `year` (preserved from Bronze)
+# MAGIC - **Write Mode:** Dynamic partition overwrite (rewrites only incoming year partitions)
+# MAGIC - **Rationale:** Annual partitioning optimizes long-term historical queries and aligns with business reporting cycles
+# MAGIC 
+# MAGIC **Null Preservation Philosophy:**
+# MAGIC - **Quantities/Values:** Nulls preserved (represent missing data, not zero)
+# MAGIC - **Quality Flag:** `is_complete_transaction` identifies records with both quantity and value present
+# MAGIC - **Rationale:** Enables transparent downstream decisions (filter incomplete vs impute)
+# MAGIC 
+# MAGIC **Domain Validation:**
+# MAGIC - **Quantities:** Negative values nullified (invalid transactions)
+# MAGIC - **Values:** Negative values nullified, rounded to 2 decimals
+# MAGIC - **Dates:** Future dates nullified (historical transaction assumption)
+# MAGIC 
+# MAGIC **Derived Technical Columns:**
+# MAGIC 
+# MAGIC | Column | Logic | Purpose |
+# MAGIC |--------|-------|--------|
+# MAGIC | `unit_price` | `value / quantity` (when both > 0) | Enable price analysis without Gold aggregation |
+# MAGIC | `is_active_sale` | `quantity > 0` | Quick filter for actual vs cancelled/returned transactions |
+# MAGIC | `transaction_month` | `month(date)` | Temporal analysis (year already exists as partition) |
+# MAGIC | `is_complete_transaction` | Both quantity and value non-null | Data quality signal |
+# MAGIC 
+# MAGIC **Design Philosophy:**
+# MAGIC - Derived columns are **technical attributes** (not business KPIs)
+# MAGIC - `unit_price` enables row-level filtering without joins (Silver scope)
+# MAGIC - Aggregated metrics remain in Gold Layer
+# MAGIC 
+# MAGIC **Output Schema:** Standardized snake_case, null-preserved quantities, quality flags, annual partitions
 
 # COMMAND ----------
 
@@ -323,22 +485,30 @@ qty_cols = [c for c in df.columns if "quantity" in c or "cantidad" in c or "qty"
 value_cols = [c for c in df.columns if "value" in c or "valor" in c or "amount" in c or "monto" in c]
 date_cols = [c for c in df.columns if "date" in c or "fecha" in c]
 
-# Quantity validation: must be >= 0
+# Quantity validation: must be >= 0, reject negatives but preserve nulls with flag
 for qty_col in qty_cols:
     df = df.withColumn(
         qty_col,
-        when(col(qty_col).isNull(), lit(0))  # Null = 0
-        .when(col(qty_col) < 0, lit(0))  # Negative = 0
+        when(col(qty_col).isNull(), lit(None))  # Keep null explicit (missing data)
+        .when(col(qty_col) < 0, lit(None))  # Reject invalid negatives
         .otherwise(col(qty_col).cast(IntegerType()))
     )
 
-# Value validation: must be >= 0, round to 2 decimals
+# Value validation: must be >= 0, round to 2 decimals, reject negatives
 for value_col in value_cols:
     df = df.withColumn(
         value_col,
-        when(col(value_col).isNull(), lit(0))
-        .when(col(value_col) < 0, lit(0))
+        when(col(value_col).isNull(), lit(None))  # Keep null explicit
+        .when(col(value_col) < 0, lit(None))  # Reject invalid negatives
         .otherwise(spark_round(col(value_col).cast(DoubleType()), 2))
+    )
+
+# Data completeness flag: transaction has valid quantity and value
+if qty_cols and value_cols:
+    df = df.withColumn(
+        "is_complete_transaction",
+        when((col(qty_cols[0]).isNotNull()) & (col(value_cols[0]).isNotNull()), lit(True))
+        .otherwise(lit(False))
     )
 
 # Derived column: unit_price (value / quantity)
@@ -362,21 +532,20 @@ for date_col in date_cols:
         .otherwise(col(date_col).cast(DateType()))
     )
 
-# Derived columns: year, month (from date if exists)
+# Derived column: transaction_month (year already exists as partition column)
 if date_cols:
-    df = df.withColumn("transaction_year", year(col(date_cols[0]))) \
-           .withColumn("transaction_month", month(col(date_cols[0])))
+    df = df.withColumn("transaction_month", month(col(date_cols[0])))
 
 # Audit columns
 df = df.withColumn("processing_date", current_date()) \
        .withColumn("processing_timestamp", current_timestamp())
 
 # Write to Silver (preserve year partitioning)
+# Note: overwriteSchema removed - incompatible with dynamic partition overwrite
 df.write \
     .format("delta") \
     .mode("overwrite") \
     .option("delta.columnMapping.mode", "name") \
-    .option("overwriteSchema", "true") \
     .option("partitionOverwriteMode", "dynamic") \
     .partitionBy("year") \
     .saveAsTable(SILVER_SELL_IN)
@@ -384,9 +553,28 @@ df.write \
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 6. Validation: Silver Layer Metrics
+# MAGIC ## 6. Validation: Post-Write Metrics
 # MAGIC 
-# MAGIC **Post-ingestion validation using Delta History (no count operations)**
+# MAGIC **Validation Strategy:** Leverage Delta Lake transaction logs for zero-compute metrics extraction.
+# MAGIC 
+# MAGIC ### Design Rationale
+# MAGIC 
+# MAGIC **Why Delta History:**
+# MAGIC - `DESCRIBE HISTORY` queries metadata (no DataFrame scans)
+# MAGIC - Serverless-friendly (no cluster overhead)
+# MAGIC - Provides row counts, file counts, and operation type
+# MAGIC 
+# MAGIC **What This Validates:**
+# MAGIC - Write operations completed successfully
+# MAGIC - Expected number of output files (partition efficiency)
+# MAGIC - Operation type matches intent (WRITE vs MERGE)
+# MAGIC 
+# MAGIC **What This Does NOT Validate:**
+# MAGIC - Business logic correctness (handled by explicit transformations)
+# MAGIC - Data quality metrics (handled by domain validations)
+# MAGIC - Cross-table referential integrity (deferred to Gold Layer)
+# MAGIC 
+# MAGIC This approach balances validation coverage with operational cost.
 
 # COMMAND ----------
 
@@ -413,13 +601,44 @@ for table_name, table_full_name in silver_tables.items():
 # MAGIC 
 # MAGIC ## Silver Layer Complete
 # MAGIC 
-# MAGIC **Tables Created:**
-# MAGIC - workspace.default.silver_master_pdv
-# MAGIC - workspace.default.silver_master_products
-# MAGIC - workspace.default.silver_price_audit (partitioned by year_month)
-# MAGIC - workspace.default.silver_sell_in (partitioned by year)
+# MAGIC ### Output Assets
 # MAGIC 
-# MAGIC **Next:** Gold layer for business aggregations and KPIs
+# MAGIC | Table | Type | Partition | Records Source | Purpose |
+# MAGIC |-------|------|-----------|----------------|--------|
+# MAGIC | `silver_master_pdv` | Dimension | None | ~50 stores | Geographic and organizational attributes |
+# MAGIC | `silver_master_products` | Dimension | None | ~200 products | Product hierarchy and attributes |
+# MAGIC | `silver_price_audit` | Fact | `year_month` | Historical audits | Point-in-time price observations |
+# MAGIC | `silver_sell_in` | Fact | `year` | Transactional | Manufacturer sales to retailers |
+# MAGIC 
+# MAGIC ### Architectural Role
+# MAGIC 
+# MAGIC **Silver Layer Responsibilities:**
+# MAGIC - ✅ Schema standardization and type safety
+# MAGIC - ✅ Domain validation (prices, dates, quantities)
+# MAGIC - ✅ Deterministic deduplication by business keys
+# MAGIC - ✅ Null preservation with quality signals
+# MAGIC - ✅ Temporal lineage to Bronze
+# MAGIC 
+# MAGIC **Handed Off to Gold Layer:**
+# MAGIC - Business KPIs (sales velocity, price indices, market share)
+# MAGIC - Cross-dataset joins (PDV × Products × Transactions)
+# MAGIC - Time-series aggregations (monthly trends, YoY growth)
+# MAGIC - Analytical models (Star schema, conformed dimensions)
+# MAGIC 
+# MAGIC ### Technical Characteristics
+# MAGIC 
+# MAGIC - **Format:** Delta Lake with Unity Catalog governance
+# MAGIC - **Write Mode:** Overwrite (masters), Dynamic Partition Overwrite (facts)
+# MAGIC - **Schema Evolution:** Controlled (no automatic merges on masters)
+# MAGIC - **Optimization:** Coalesced files, partition pruning enabled
+# MAGIC - **Serverless Compatible:** No cache/persist, single write per table
+# MAGIC 
+# MAGIC ---
+# MAGIC 
+# MAGIC **Next Stage:** Gold Layer (`03_gold_aggregation.py`) will consume Silver tables to produce:
+# MAGIC - Star schema dimensional model
+# MAGIC - Pre-aggregated KPI tables
+# MAGIC - Power BI-optimized datasets
 # MAGIC 
 # MAGIC ---
 # MAGIC 

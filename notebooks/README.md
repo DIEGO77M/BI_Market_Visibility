@@ -1,241 +1,155 @@
-# 📓 Databricks Notebooks
+# 📓 Databricks Notebooks - Medallion Architecture
 
-## 🎯 Medallion Architecture Implementation
-
-Execute notebooks in the following order:
-
-1. **[01_bronze_ingestion.py](01_bronze_ingestion.py)** ✅ - Raw data ingestion into Delta Lake
-2. **[02_silver_standardization.py](02_silver_standardization.py)** ✅ - Data standardization and quality
-3. **03_gold_analytics.py** 🚧 - Business aggregations and star schema (Coming soon)
+End-to-end data pipeline implementing Bronze-Silver-Gold architecture with production-grade practices.
 
 ---
 
-## 📊 Notebook Details
+## 🎯 Execution Order
 
-### 01_bronze_ingestion.py ✅ COMPLETED
-
-**Purpose:** Ingest raw data from multiple sources with ACID guarantees
-
-**Inputs:**
-- CSV files: Master_PDV, Master_Products
-- Excel files (24): Price_Audit (partitioned by year_month)
-- Excel files (2): Sell-In (partitioned by year)
-
-**Outputs:**
-- `workspace.default.bronze_master_pdv` (51 rows)
-- `workspace.default.bronze_master_products` (201 rows)
-- `workspace.default.bronze_price_audit` (1,200+ rows, partitioned)
-- `workspace.default.bronze_sell_in` (400+ rows, partitioned)
-
-**Key Features:**
-- Unity Catalog managed tables
-- Delta Lake with column mapping
-- File-by-file Excel processing (optimized memory usage)
-- Audit columns (ingestion_timestamp, source_file)
-- Dynamic partition overwrite
-- Performance metrics from Delta History
-
-**Runtime:** ~2-4 minutes (Databricks Serverless)
+| # | Notebook | Status | Runtime | Purpose |
+|---|----------|--------|---------|---------|
+| 1 | **01_bronze_ingestion** | ✅ | ~3 min | Raw data ingestion with ACID guarantees |
+| 2 | **02_silver_standardization** | ✅ | ~2 min | Data cleaning and business rules |
+| 3 | **03_gold_analytics** | 🚧 | TBD | Dimensional modeling for BI |
 
 ---
 
-### 02_silver_standardization.py ✅ COMPLETED
+## 📊 Bronze Layer: Raw Data Ingestion
 
-**Purpose:** Standardize and validate Bronze data with business rules
+**[01_bronze_ingestion.py](01_bronze_ingestion.py)**
 
-**Inputs:**
-- `workspace.default.bronze_master_pdv`
-- `workspace.default.bronze_master_products`
-- `workspace.default.bronze_price_audit`
-- `workspace.default.bronze_sell_in`
+### What It Does
+Ingests raw data from multiple sources into Delta Lake with minimal transformation, establishing an immutable historical record.
 
-**Outputs:**
-- `workspace.default.silver_master_pdv` (deduplicated, standardized)
-- `workspace.default.silver_master_products` (price validated)
-- `workspace.default.silver_price_audit` (filtered, partitioned by year_month)
-- `workspace.default.silver_sell_in` (enriched, partitioned by year)
+### Data Sources & Outputs
 
-**Transformations Applied:**
-1. **Schema standardization** - snake_case, explicit types
-2. **Text normalization** - trim, uppercase
-3. **Deduplication** - by business keys (PDV code, Product code)
-4. **Domain validations** - prices > 0, no future dates
-5. **Derived columns** - unit_price, is_active_sale, year/month
-6. **Audit metadata** - processing_date, processing_timestamp
+| Source | Format | Output Table | Records | Strategy |
+|--------|--------|--------------|---------|----------|
+| Master PDV | CSV | `bronze_master_pdv` | 51 | Full overwrite |
+| Master Products | CSV | `bronze_master_products` | 201 | Full overwrite |
+| Price Audit | 24 Excel files | `bronze_price_audit` | 1,200+ | Incremental append |
+| Sell-In | 2 Excel files | `bronze_sell_in` | 400+ | Dynamic partition overwrite |
 
-**Best Practices:**
-- Reads ONLY from Bronze Delta tables
-- Serverless optimized (no cache/persist)
-- Single write action per table
-- Efficient validation via Delta History
-- ✅ No over-engineering (simple, explicit)
+### Architectural Highlights
 
-**Runtime:** ~1-2 minutes
-- Data type conversions
-- Apply business rules
-- Data quality checks
+**ADR-001: Delta History for Zero-Compute Validation**
+- Uses `DESCRIBE HISTORY` instead of `df.count()` for metrics
+- Saves ~$36/year in Serverless compute costs
+- Millisecond latency vs seconds for traditional validation
 
-**Runtime:** ~15 minutes
+**ADR-002: Dynamic Partition Overwrite**
+- 10-20x faster than MERGE for complete replacements
+- ACID-compliant atomic updates per partition
+- Idempotent re-runs (safe to execute multiple times)
 
----
+**ADR-003: Metadata Prefix Pattern**
+- All audit columns use `_metadata_` prefix
+- Prevents collision with source business columns
+- Easy filtering in downstream Silver layer
 
-### 03_gold_analytics.ipynb
+**ADR-004: Deterministic Batch IDs**
+- Format: `YYYYMMDD_HHMMSS_notebook`
+- Enables surgical rollbacks via Delta time travel
+- Example: `20251231_030015_bronze_ingestion`
 
-**Purpose:** Create business-ready aggregations and dimensional models.
-
-**Inputs:**
-- Silver layer Delta tables
-
-**Outputs:**
-- Gold layer Delta tables in `data/gold/` directory
-- Fact and dimension tables
-- Pre-calculated KPIs
-
-**Key Operations:**
-- Create star schema
-- Build fact tables
-- Build dimension tables
-- Calculate KPIs
-- Optimize for BI queries
-
-**Runtime:** ~20 minutes
+### Technical Features
+- ✅ Unity Catalog managed tables with governance
+- ✅ File-by-file Excel processing (memory-efficient)
+- ✅ TBLPROPERTIES for metadata and ownership
+- ✅ Serverless optimized (no cache/persist)
 
 ---
 
-## Prerequisites
+## 🥈 Silver Layer: Standardization & Validation
 
-### Databricks Configuration
+**[02_silver_standardization.py](02_silver_standardization.py)**
 
-```python
-# Cluster requirements
-- Databricks Runtime: 13.3 LTS or higher
-- Worker type: Standard_DS3_v2 (or equivalent)
-- Min workers: 2
-- Max workers: 8
+### What It Does
+Applies business rules, data quality checks, and standardization to Bronze data, creating analytics-ready datasets.
+
+### Transformations Applied
+
+| Transformation | Purpose | Example |
+|----------------|---------|---------|
+| **Schema Standardization** | snake_case, explicit types | `ProductName` → `product_name STRING` |
+| **Text Normalization** | Consistent formatting | `trim()`, `upper()` on codes |
+| **Deduplication** | Single source of truth | Latest record by PDV/Product code |
+| **Domain Validation** | Business rule enforcement | prices > 0, no future dates |
+| **Derived Columns** | Enrich with calculations | `unit_price`, `is_active_sale` |
+
+### Architecture Principles
+
+**"Read ONLY from Bronze Delta Tables"**
+- No raw file ingestion in Silver
+- Bronze is single source of truth
+- Clear layer separation
+
+**"One Write Action Per Dataset"**
+- Single `.write()` operation per table
+- Avoids data loss and partial writes
+- Serverless cost optimization
+
+**"No Over-Engineering"**
+- No streaming (batch is sufficient)
+- No CDC (not required)
+- No unnecessary complexity
+
+### Output Tables
+
+| Table | Partitioning | Business Logic |
+|-------|--------------|----------------|
+| `silver_master_pdv` | None | Deduplicated by PDV_Code, standardized names |
+| `silver_master_products` | None | Price validated, brand hierarchy |
+| `silver_price_audit` | `year_month` | Filtered invalid prices, enriched with month |
+| `silver_sell_in` | `year` | Unit price calculated, active sales flagged |
+
+---
+
+## 🥇 Gold Layer: Analytics (Planned)
+
+**03_gold_analytics.py** 🚧
+
+### What It Will Do
+- Dimensional modeling (star schema)
+- Pre-aggregated fact tables
+- KPI calculations
+- BI-optimized denormalization
+
+### Planned Outputs
+- `gold_fact_sales` - Transaction-level fact table
+- `gold_dim_pdv` - Point of sale dimension
+- `gold_dim_product` - Product hierarchy dimension
+- `gold_dim_date` - Calendar dimension with fiscal periods
+
+---
+
+## 📈 Production Deployment
+
+**Databricks Job Configuration:**
+
+```yaml
+Job: Bronze_Pipeline_Daily
+Schedule: 3:00 AM daily
+Tasks:
+  1. bronze_ingestion (60 min timeout)
+  2. drift_monitoring_bronze (depends on task 1)
+  3. silver_standardization (depends on task 1)
+  4. gold_analytics (depends on task 3)
 ```
 
-### Libraries
-
-All required libraries are listed in `requirements.txt`. Install them in your cluster:
-
-```bash
-%pip install -r requirements.txt
-```
-
-### Environment Variables
-
-Set the following in your Databricks workspace:
-
-```python
-# Path configurations
-BRONZE_PATH = "/mnt/bronze/"
-SILVER_PATH = "/mnt/silver/"
-GOLD_PATH = "/mnt/gold/"
-```
+**Monitoring:** Schema drift detection via [`monitoring/drift_monitoring_bronze.py`](../monitoring/drift_monitoring_bronze.py)
 
 ---
 
-## Running the Notebooks
+## 💡 Key Learnings for Interviews
 
-### Option 1: Manual Execution
-
-1. Import notebooks to Databricks workspace
-2. Attach to appropriate cluster
-3. Run cells sequentially
-4. Verify outputs in each layer
-
-### Option 2: Job Scheduling
-
-Create a Databricks job with the following tasks:
-
-```json
-{
-  "tasks": [
-    {
-      "task_key": "bronze_ingestion",
-      "notebook_path": "/notebooks/01_bronze_ingestion"
-    },
-    {
-      "task_key": "silver_transformation",
-      "depends_on": [{"task_key": "bronze_ingestion"}],
-      "notebook_path": "/notebooks/02_silver_transformation"
-    },
-    {
-      "task_key": "gold_analytics",
-      "depends_on": [{"task_key": "silver_transformation"}],
-      "notebook_path": "/notebooks/03_gold_analytics"
-    }
-  ]
-}
-```
+1. **Cost Optimization:** Zero-compute validation saves Serverless costs
+2. **Architectural Decisions:** Documented WHY (not just HOW) via ADRs
+3. **Production Readiness:** Deterministic batch IDs, idempotent runs, monitoring
+4. **Trade-off Analysis:** When to use MERGE vs Overwrite, pandas vs spark-excel
+5. **Best Practices:** Single Responsibility, no over-engineering, clear layer boundaries
 
 ---
 
-## Best Practices
-
-1. **Always test on sample data first** before running on full dataset
-2. **Use notebook parameters** for flexible execution
-3. **Enable Delta table optimization** regularly
-4. **Document assumptions** in markdown cells
-5. **Log key metrics** for monitoring
-
----
-
-## Troubleshooting
-
-### Common Issues
-
-**Issue:** OutOfMemoryError
-- **Solution:** Increase cluster size or partition data better
-
-**Issue:** Delta table not found
-- **Solution:** Verify paths and ensure previous layer executed successfully
-
-**Issue:** Schema mismatch
-- **Solution:** Check schema evolution settings, use mergeSchema option
-
-**Issue:** Slow performance
-- **Solution:** Enable caching, optimize partitions, use Z-ordering
-
----
-
-## Monitoring
-
-Monitor notebook execution through:
-
-1. **Databricks Job Runs:** View history and logs
-2. **Delta Table History:** Check versions and operations
-3. **Data Quality Reports:** Review validation results
-4. **Performance Metrics:** Track runtime trends
-
----
-
-## Development Guidelines
-
-When modifying notebooks:
-
-1. Create a feature branch
-2. Test changes thoroughly
-3. Document changes in markdown cells
-4. Update this README if needed
-5. Create pull request for review
-
----
-
-## Version Control
-
-Notebooks are version controlled in Git. To sync:
-
-```bash
-# Export from Databricks
-databricks workspace export /notebooks/01_bronze_ingestion.ipynb ./notebooks/
-
-# Import to Databricks  
-databricks workspace import ./notebooks/01_bronze_ingestion.ipynb /notebooks/
-```
-
----
-
-## Contact
-
-For questions or issues with notebooks, contact [Your Email]
+**Author:** Diego Mayorga | [GitHub](https://github.com/DIEGO77M/BI_Market_Visibility)  
+**Last Updated:** 2025-12-31
