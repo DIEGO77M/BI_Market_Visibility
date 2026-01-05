@@ -1,8 +1,9 @@
-# 🔍 Monitoring - Schema Drift Detection
+# 🔍 Monitoring - Schema & Quality Drift Detection
 
 **Purpose:** Operational monitoring for schema evolution across Bronze, Silver, and Gold layers of the Medallion Architecture.
 
 ---
+
 
 ## 📁 Structure
 
@@ -11,8 +12,11 @@ monitoring/
 ├── drift_monitoring_bronze.py    # Bronze layer schema drift detection
 ├── silver_drift_monitoring.py    # Silver layer drift monitoring (schema, quality, volume)
 ├── drift_monitoring_gold.py      # [Future] Gold layer monitoring
-└── README.md                      # This file
+└── README.md                     # This file
 ```
+
+**Notebooks:**
+- [../notebooks/silver_drift_monitoring.ipynb](../notebooks/silver_drift_monitoring.ipynb) (Databricks-ready, executable)
 
 ---
 

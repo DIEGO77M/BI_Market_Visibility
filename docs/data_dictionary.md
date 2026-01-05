@@ -1,3 +1,21 @@
+### silver_drift_history (Audit Table)
+
+| Column Name      | Data Type | Description                                 | Example |
+|------------------|-----------|---------------------------------------------|---------|
+| table_name       | string    | Silver table monitored                      | silver_master_pdv |
+| drift_type       | string    | Type of drift detected (schema/volume)      | schema/volume |
+| severity         | string    | Severity of drift (HIGH/MEDIUM/LOW)         | HIGH |
+| details          | string    | JSON with drift details                     | {"missing_columns": ["price"]} |
+| baseline_json    | string    | JSON with baseline schema/metrics           | {"schema": {...}, "metrics": {...}} |
+| timestamp        | timestamp | Detection time                              | 2026-01-05 10:00:00 |
+
+**Table Purpose:** Audit and observability of all schema, quality, and volume drift events detected in Silver layer. Used for executive monitoring and operational traceability.
+
+**Refresh Frequency:** After each Silver write (post-write hook or manual)
+
+**Notes:**
+- Only metadata is stored (no data scan)
+- Table is append-only for full auditability
 # Data Dictionary
 
 ## Overview

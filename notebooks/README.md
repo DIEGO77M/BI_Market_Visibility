@@ -4,7 +4,16 @@ End-to-end data pipeline implementing Bronze-Silver-Gold architecture with produ
 
 ---
 
+
 ## 🎯 Execution Order
+
+| # | Notebook | Status | Runtime | Purpose |
+|---|----------|--------|---------|---------|
+| 1 | **01_bronze_ingestion** | ✅ | ~3 min | Raw data ingestion with ACID guarantees |
+| 2 | **02_silver_standardization** | ✅ | ~2 min | Data cleaning and business rules |
+| 3 | **silver_drift_monitoring** | ✅ | ~1 min | Silver schema, quality & volume drift monitoring |
+| 4 | **03_gold_analytics** | 🚧 | TBD | Dimensional modeling for BI |
+
 
 | # | Notebook | Status | Runtime | Purpose |
 |---|----------|--------|---------|---------|
@@ -60,7 +69,25 @@ Ingests raw data from multiple sources into Delta Lake with minimal transformati
 
 ---
 
-## 🥈 Silver Layer: Standardization & Validation
+
+## 🥈 Silver Layer: Standardization & Drift Monitoring
+
+**[02_silver_standardization.py](02_silver_standardization.py)**
+
+**[silver_drift_monitoring.ipynb](silver_drift_monitoring.ipynb)**
+
+### What It Does
+Applies business rules, data quality checks, and standardization to Bronze data, creating analytics-ready datasets. After each Silver write, the drift monitoring notebook detects schema, quality, and volume drift, logging results in the audit table for observability and executive action.
+
+### How to Run Drift Monitoring
+1. Run the Silver pipeline notebook.
+2. Run `silver_drift_monitoring.ipynb` in Databricks (manual or as a post-write job).
+3. Review recent drift events in the `silver_drift_history` table.
+
+**Audit Table Example:**
+```sql
+SELECT * FROM workspace.default.silver_drift_history ORDER BY timestamp DESC;
+```
 
 **[02_silver_standardization.py](02_silver_standardization.py)**
 

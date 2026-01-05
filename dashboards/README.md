@@ -2,7 +2,16 @@
 
 Interactive business intelligence dashboards connecting to Gold layer Delta tables for real-time market visibility analytics.
 
----
+
+## 🛡️ Data Quality & Monitoring Integration
+
+**Silver drift monitoring** is fully integrated: all Gold tables and Power BI dashboards are fed from Silver datasets with schema, quality, and volume drift monitoring. Data quality KPIs and freshness indicators are available for executive review.
+
+**Checklist:**
+- [x] Gold tables only consume Silver with validated quality
+- [x] Data quality and drift KPIs available in dashboard
+- [x] Monitoring results (silver_drift_history) can be visualized or queried from Power BI
+- [x] Documentation and lineage traceable from dashboard to source
 
 ## 📁 Dashboard Files
 

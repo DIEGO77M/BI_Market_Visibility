@@ -107,6 +107,34 @@ databricks configure --token
 
 ---
 
+
+## 🏛️ Architecture & Monitoring
+
+This project implements a **Medallion Architecture** in Databricks, with robust monitoring for schema, quality, and volume drift in both Bronze and Silver layers. All monitoring is metadata-only, non-blocking, and audited in Delta tables.
+
+### Architecture Diagram
+
+![Architecture Diagram](docs/architecture/architecture_diagram.png)
+
+**Key Monitoring Features:**
+- Bronze: Schema drift detection, audit table `bronze_schema_alerts`
+- Silver: Schema, quality & volume drift, audit table `silver_drift_history`
+- All monitoring scripts and notebooks integrated in Databricks and versioned in GitHub
+
+**Silver Drift Monitoring Notebook:**
+- [notebooks/silver_drift_monitoring.ipynb](notebooks/silver_drift_monitoring.ipynb) (Databricks-ready, executable, documented)
+
+**Professional Presentation Checklist:**
+- [x] Medallion Architecture (Bronze, Silver, Gold)
+- [x] Serverless & Delta Lake best practices
+- [x] Robust drift monitoring (Bronze & Silver)
+- [x] Executable and documented notebooks
+- [x] Data dictionary and updated documentation
+- [x] Power BI dashboards connected to Gold
+- [x] README with badges, screenshots, and key results
+
+---
+
 ## 🥉 Bronze Layer - Data Ingestion ✅ COMPLETED
 
 ### Overview
