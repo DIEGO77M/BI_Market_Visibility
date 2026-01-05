@@ -247,25 +247,38 @@ def get_previous_schema_from_delta_history(table_name, catalog, schema, current_
             return None
         
         prev_version = history[0].version
-        
-        # Restore table to previous version temporarily to get schema
-        temp_df = spark.read.format("delta").option("versionAsOf", prev_version).table(full_table_name)
-        
-        # Extract business columns
-        business_columns = sorted([
-            c for c in temp_df.columns 
-            if not c.startswith('_metadata_') 
-            and c not in ['year', 'year_month']
-        ])
-        
-        return {
-            "table_name": table_name,
-            "version": prev_version,
-            "timestamp": history[0].timestamp,
-            "column_count": len(business_columns),
-            "columns": business_columns
-        }
-        
+        operation_params = history[0].operationParameters
+        # Try to extract schema from operationParameters (metadata-only)
+        if operation_params and 'schemaString' in operation_params:
+            import json
+            schema_json = json.loads(operation_params['schemaString'])
+            business_columns = sorted([
+                field['name'] for field in schema_json['fields']
+                if not field['name'].startswith('_metadata_')
+                and field['name'] not in ['year', 'year_month']
+            ])
+            return {
+                "table_name": table_name,
+                "version": prev_version,
+                "timestamp": history[0].timestamp,
+                "column_count": len(business_columns),
+                "columns": business_columns
+            }
+        else:
+            # Fallback: restore table to previous version (expensive)
+            temp_df = spark.read.format("delta").option("versionAsOf", prev_version).table(full_table_name)
+            business_columns = sorted([
+                c for c in temp_df.columns 
+                if not c.startswith('_metadata_') 
+                and c not in ['year', 'year_month']
+            ])
+            return {
+                "table_name": table_name,
+                "version": prev_version,
+                "timestamp": history[0].timestamp,
+                "column_count": len(business_columns),
+                "columns": business_columns
+            }
     except Exception as e:
         print(f"   ⚠️  Error extracting previous schema for {table_name}: {str(e)}")
         return None

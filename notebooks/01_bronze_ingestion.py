@@ -636,18 +636,32 @@ for col_name in df_price_audit.columns:
         date_column = col_name
         break
 
+
 if date_column:
     df_price_audit = df_price_audit \
         .withColumn("year", year(col(date_column))) \
         .withColumn("month", month(col(date_column))) \
         .withColumn("year_month", concat_ws("-", col("year"), col("month")))
 else:
-    # Extract from filename using _metadata.file_path
+    # Extract from filename: Price_Audit_YYYY_MM.xlsx
+    from pyspark.sql.functions import regexp_extract, regexp_replace
     print("⚠️ Warning: No date column found. Extracting year_month from filename.")
-    # Filename pattern: Price_Audit_YYYY_MM.xlsx
+    df_price_audit = df_price_audit.withColumn(
+        "year_month",
+        regexp_replace(
+            regexp_extract(col("_metadata_file_path"), r"Price_Audit_(\d{4}_\d{2})", 1),
+            "_", "-"
+        )
+    )
+    # Extract year and month for consistency
     df_price_audit = df_price_audit \
-        .withColumn("file_name", col("_metadata.file_name")) \
-        .withColumn("year_month", lit("2021-01"))  # Default, will be overridden by actual filename parsing
+        .withColumn("year", regexp_extract(col("year_month"), r"(\d{4})", 1).cast("int")) \
+        .withColumn("month", regexp_extract(col("year_month"), r"-(\d{2})", 1).cast("int"))
+    # Validate extraction worked
+    invalid_count = df_price_audit.filter((col("year_month") == "") | (col("year_month").isNull())).count()
+    if invalid_count > 0:
+        raise ValueError(f"❌ Failed to extract year_month from {invalid_count} records. Check filename pattern (expected: Price_Audit_YYYY_MM.xlsx)")
+    print(f"   ✅ Successfully extracted year_month from filenames")
 
 # Add audit columns
 df_price_audit = add_audit_columns(df_price_audit)
@@ -767,7 +781,20 @@ elif date_column:
 else:
     # Extract from filename: Sell_In_YYYY.xlsx
     print("⚠️ Warning: No year/date column found. Extracting from filename.")
-    df_sell_in = df_sell_in.withColumn("year", lit(2021))  # Default
+    from pyspark.sql.functions import regexp_extract
+    
+    # Extract YYYY from filename pattern
+    df_sell_in = df_sell_in.withColumn(
+        "year",
+        regexp_extract(col("_metadata_source_file"), r"Sell_In_(\d{4})", 1).cast("int")
+    )
+    
+    # Validate extraction worked (prevent silent failures)
+    invalid_count = df_sell_in.filter((col("year") == 0) | (col("year").isNull())).count()
+    if invalid_count > 0:
+        raise ValueError(f"❌ Failed to extract year from {invalid_count} records. Check filename pattern (expected: Sell_In_YYYY.xlsx)")
+    
+    print(f"   ✅ Successfully extracted year from filenames")
 
 # Coalesce to control file count
 df_sell_in = df_sell_in.coalesce(2)

@@ -8,20 +8,45 @@ This document provides detailed information about all data entities, attributes,
 
 ## Bronze Layer Tables
 
-### raw_[table_name]
 
-| Column Name | Data Type | Description | Source | Nullable | Example |
-|-------------|-----------|-------------|--------|----------|---------|
-| column_1 | string | [Description] | [Source system] | Yes/No | [Sample value] |
-| column_2 | integer | [Description] | [Source system] | Yes/No | [Sample value] |
-| ingestion_timestamp | timestamp | Timestamp when record was ingested | System | No | 2024-01-15 10:30:00 |
-| source_file | string | Original source file name | System | No | data_20240115.csv |
+### bronze_master_pdv
 
-**Table Purpose:** [Describe the purpose and use case]
+| Column Name              | Data Type | Description                        | Source         | Nullable | Example           |
+|-------------------------|-----------|------------------------------------|----------------|----------|-------------------|
+| Code (eLeader)          | string    | Point of sale unique identifier    | master_pdv_raw | No       | PDV0001           |
+| Store Name              | string    | Point of sale name                 | master_pdv_raw | No       | Store_001         |
+| Channel                 | string    | Sales channel                      | master_pdv_raw | Yes      | Direct Trade      |
+| Sub Channel             | string    | Subdivision of channel             | master_pdv_raw | Yes      | Independent Supermarket |
+| Chain                   | string    | Retail chain name                  | master_pdv_raw | Yes      | Independent       |
+| Neighborhood            | string    | Neighborhood                       | master_pdv_raw | Yes      | Brown's Town      |
+| City                    | string    | City                               | master_pdv_raw | Yes      | Brown's Town      |
+| Parish                  | string    | Parish/region                      | master_pdv_raw | Yes      | St Ann            |
+| Country                 | string    | Country                            | master_pdv_raw | Yes      | Jamaica           |
+| Latitude                | string    | Store latitude                     | master_pdv_raw | Yes      | 180.562.475       |
+| Longitude               | string    | Store longitude                    | master_pdv_raw | Yes      | -768.061.162      |
+| Type of Service         | string    | Store service type                 | master_pdv_raw | Yes      | MERCHANDISER      |
+| Status                  | string    | Store status                       | master_pdv_raw | Yes      | ACTIVE            |
+| Supervisor Code         | string    | Supervisor code                    | master_pdv_raw | Yes      | SUP-003           |
+| Supervisor Name         | string    | Supervisor name                    | master_pdv_raw | Yes      | Michael Brown     |
+| Merchandiser Code       | string    | Merchandiser code                  | master_pdv_raw | Yes      | MER-008           |
+| Merchandiser Name       | string    | Merchandiser name                  | master_pdv_raw | Yes      | Leroy Campbell    |
+| CODE PO                 | string    | Purchase order code                | master_pdv_raw | Yes      | PO_001            |
+| Aditional_Exhibitions   | string    | Additional exhibitions             | master_pdv_raw | Yes      | Yes               |
+| Commercial Activities   | string    | Commercial activities              | master_pdv_raw | Yes      | No                |
+| Planograms              | string    | Planogram compliance               | master_pdv_raw | Yes      | Yes               |
+| Store SAP Code          | string    | SAP code for store                 | master_pdv_raw | Yes      | 3031244           |
+| Sales Rep               | string    | Sales representative               | master_pdv_raw | Yes      | Shakeera Marshall |
+| _metadata_ingestion_timestamp | timestamp | Data ingestion time           | System         | No       | 2025-12-31 03:00:00 |
+| _metadata_source_file   | string    | Source file path                   | System         | No       | /Volumes/.../master_pdv_raw.csv |
+| _metadata_batch_id      | string    | Batch identifier                   | System         | No       | 20251231_030000_bronze_ingestion |
+| _metadata_ingestion_date| date      | Ingestion date                     | System         | No       | 2025-12-31        |
+
+**Table Purpose:** Store master data for point-of-sale locations, used for geographic and organizational analysis.
 
 **Data Quality Rules:**
-- Rule 1: [Description]
-- Rule 2: [Description]
+- Code (eLeader) must be unique and not null
+- Store Name must not be null
+- Latitude/Longitude should be valid coordinates if present
 
 ---
 
