@@ -1,4 +1,5 @@
 # Silver Layer - Lightweight Drift Monitoring
+# Test: Workflow CI/CD sync - 2026-01-05
 # Author: Diego Mayorga
 # Date: 2026-01-05
 # Project: BI Market Visibility Analysis
@@ -94,8 +95,28 @@ def compare_metrics(current, baseline, key="numOutputRows", threshold=0.2):
         return {"metric": key, "prev": prev, "curr": curr, "change": change}
     return None
 
+
+# --- Utility: Ensure audit table exists ---
+def ensure_audit_table(spark):
+    """
+    Create the audit table if it does not exist.
+    """
+    spark.sql(f"""
+        CREATE TABLE IF NOT EXISTS {AUDIT_TABLE} (
+            timestamp TIMESTAMP,
+            table_name STRING,
+            drift_type STRING,
+            severity STRING,
+            details STRING,
+            baseline_json STRING,
+            notified BOOLEAN
+        )
+        USING DELTA
+    """)
+
 # --- Main monitoring loop ---
 def run_silver_drift_monitoring(spark):
+    ensure_audit_table(spark)
     for table in SILVER_TABLES:
         full_table = f"{CATALOG}.{SCHEMA}.{table}"
         # 1. Get current schema and metrics
