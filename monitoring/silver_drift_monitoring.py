@@ -49,12 +49,15 @@ def get_delta_history_metrics(spark, table):
 # --- Utility: Load baseline (from audit table or static) ---
 def load_baseline(spark, table):
     try:
+        # Check if audit table exists (serverless-friendly)
+        if not spark._jsparkSession.catalog().tableExists(AUDIT_TABLE):
+            return None
         df = spark.table(AUDIT_TABLE).filter(col("table_name") == table).orderBy(col("timestamp").desc())
         last = df.first()
         if last:
             return json.loads(last["baseline_json"])
     except Exception:
-        pass
+        return None
     return None
 
 # --- Utility: Save drift event ---
