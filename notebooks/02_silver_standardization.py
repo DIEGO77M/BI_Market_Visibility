@@ -83,8 +83,58 @@ from pyspark.sql.functions import (
     round as spark_round,
     row_number
 )
+
+# --- Utility: Standardize column names to snake_case ---
+def standardize_column_names(df, exclude_cols=None):
+    """
+    Convert all column names to snake_case.
+    Args:
+        df: DataFrame to standardize
+        exclude_cols: List of columns to preserve (e.g., partition keys)
+    Returns:
+        DataFrame with standardized column names
+    """
+    exclude_cols = exclude_cols or []
+    for old_name in df.columns:
+        if old_name in exclude_cols:
+            continue
+        new_name = old_name.lower().strip()
+        new_name = new_name.replace(" ", "_").replace("-", "_")
+        new_name = new_name.replace("(", "").replace(")", "")
+        new_name = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in new_name)
+        df = df.withColumnRenamed(old_name, new_name)
+    return df
+
 from pyspark.sql.types import StringType, IntegerType, DoubleType, DecimalType, DateType, TimestampType
 from pyspark.sql.window import Window
+
+# --- Data Quality Metrics Logging ---
+def log_data_quality(df, table_name, price_cols=None, date_cols=None):
+    """
+    Log basic data quality metrics for Silver layer.
+    Args:
+        df: DataFrame to analyze
+        table_name: Logical table name (for printout)
+        price_cols: List of price/value columns (optional)
+        date_cols: List of date columns (optional)
+    """
+    total_records = df.count()
+    invalid_prices = 0
+    invalid_dates = 0
+    if price_cols:
+        invalid_prices = df.filter(
+            sum([col(c).isNull().cast("int") for c in price_cols]) > 0
+        ).count()
+    if date_cols:
+        invalid_dates = df.filter(
+            sum([col(c).isNull().cast("int") for c in date_cols]) > 0
+        ).count()
+    print(f"✅ {table_name} Quality Metrics:")
+    print(f"   Total: {total_records:,}")
+    if price_cols:
+        print(f"   Invalid Prices: {invalid_prices:,} ({invalid_prices/total_records*100 if total_records else 0:.1f}%)")
+    if date_cols:
+        print(f"   Invalid Dates: {invalid_dates:,} ({invalid_dates/total_records*100 if total_records else 0:.1f}%)")
 
 # COMMAND ----------
 
@@ -139,64 +189,42 @@ SILVER_SELL_IN = f"{CATALOG}.{SCHEMA}.silver_sell_in"
 
 # COMMAND ----------
 
+
 # Read from Bronze Delta table
 df_bronze = spark.read.table(BRONZE_MASTER_PDV)
-
 # Preserve Bronze ingestion timestamp for lineage, drop other audit columns
-df = df_bronze.withColumnRenamed("ingestion_timestamp", "bronze_ingestion_timestamp") \
-              .drop("source_file", "ingestion_date")
-
-# Schema standardization: Rename columns to snake_case
-column_mapping = {}
-for c in df.columns:
-    # Convert to snake_case: lowercase, replace spaces/special chars with underscore
-    new_name = c.lower().strip().replace(" ", "_").replace("-", "_").replace("(", "").replace(")", "")
-    new_name = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in new_name)
-    column_mapping[c] = new_name
-
-# Apply renaming
-for old_name, new_name in column_mapping.items():
-    df = df.withColumnRenamed(old_name, new_name)
-
+df = df_bronze.withColumnRenamed("_metadata_ingestion_timestamp", "bronze_ingestion_timestamp") \
+              .drop("_metadata_source_file", "_metadata_ingestion_date", "_metadata_batch_id")
+# Deduplication: Keep most recent record by PDV code (deterministic)
+if "code_eleader" in df.columns and "bronze_ingestion_timestamp" in df.columns:
+    window = Window.partitionBy("code_eleader").orderBy(col("bronze_ingestion_timestamp").desc_nulls_last())
+    df = df.withColumn("_rn", row_number().over(window)).filter(col("_rn") == 1).drop("_rn")
+elif "code_eleader" in df.columns:
+    window = Window.partitionBy("code_eleader").orderBy([col(c) for c in sorted(df.columns) if c != "code_eleader"])
+    df = df.withColumn("_rn", row_number().over(window)).filter(col("_rn") == 1).drop("_rn")
+# Schema standardization
+df = standardize_column_names(df)
 # Text normalization: trim and uppercase for all string columns
 for column, dtype in df.dtypes:
     if dtype == "string":
         df = df.withColumn(column, trim(upper(col(column))))
-
 # Explicit type casting for critical columns
-# PDV Code must be string, coordinates must be double
 if "code_eleader" in df.columns:
     df = df.withColumn("code_eleader", col("code_eleader").cast(StringType()))
 if "latitude" in df.columns:
     df = df.withColumn("latitude", col("latitude").cast(DoubleType()))
 if "longitude" in df.columns:
     df = df.withColumn("longitude", col("longitude").cast(DoubleType()))
-
-# Preserve Bronze ingestion timestamp for lineage
-if "bronze_ingestion_timestamp" in df.columns:
-    # Already renamed, keep it
-    pass
-else:
-    # Should not happen, but just in case
-    pass
-
-# Deduplication: Keep most recent record by PDV code (deterministic)
-# Business key: code_eleader (standardized from "Code (eLeader)")
-if "code_eleader" in df.columns and "bronze_ingestion_timestamp" in df.columns:
-    window = Window.partitionBy("code_eleader").orderBy(col("bronze_ingestion_timestamp").desc_nulls_last())
-    df = df.withColumn("_rn", row_number().over(window)).filter(col("_rn") == 1).drop("_rn")
-elif "code_eleader" in df.columns:
-    # Fallback: use all columns for deterministic ordering if timestamp missing
-    window = Window.partitionBy("code_eleader").orderBy([col(c) for c in sorted(df.columns) if c != "code_eleader"])
-    df = df.withColumn("_rn", row_number().over(window)).filter(col("_rn") == 1).drop("_rn")
-
 # Filter: Remove records where PDV code is null (critical business field)
 if "code_eleader" in df.columns:
     df = df.filter(col("code_eleader").isNotNull())
 
 # Audit columns
 df = df.withColumn("processing_date", current_date()) \
-       .withColumn("processing_timestamp", current_timestamp())
+    .withColumn("processing_timestamp", current_timestamp())
+
+# Logging (no price/date columns in PDV, so only total)
+log_data_quality(df, "silver_master_pdv")
 
 # Write to Silver (one write action)
 # Note: overwriteSchema=false for schema stability in production
@@ -246,61 +274,48 @@ df.write \
 
 # COMMAND ----------
 
+
 # Read from Bronze
 df_bronze = spark.read.table(BRONZE_MASTER_PRODUCTS)
-
 # Preserve Bronze ingestion timestamp for lineage, drop other audit columns
-df = df_bronze.withColumnRenamed("ingestion_timestamp", "bronze_ingestion_timestamp") \
-              .drop("source_file", "ingestion_date")
-
-# Schema standardization: snake_case
-column_mapping = {}
-for c in df.columns:
-    new_name = c.lower().strip().replace(" ", "_").replace("-", "_").replace("(", "").replace(")", "")
-    new_name = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in new_name)
-    column_mapping[c] = new_name
-
-for old_name, new_name in column_mapping.items():
-    df = df.withColumnRenamed(old_name, new_name)
-
+df = df_bronze.withColumnRenamed("_metadata_ingestion_timestamp", "bronze_ingestion_timestamp") \
+              .drop("_metadata_source_file", "_metadata_ingestion_date", "_metadata_batch_id")
+# Deduplication: Keep most recent record by product code (deterministic)
+if "product_code" in df.columns and "bronze_ingestion_timestamp" in df.columns:
+    window = Window.partitionBy("product_code").orderBy(col("bronze_ingestion_timestamp").desc_nulls_last())
+    df = df.withColumn("_rn", row_number().over(window)).filter(col("_rn") == 1).drop("_rn")
+elif "product_code" in df.columns:
+    window = Window.partitionBy("product_code").orderBy([col(c) for c in sorted(df.columns) if c != "product_code"])
+    df = df.withColumn("_rn", row_number().over(window)).filter(col("_rn") == 1).drop("_rn")
+# Schema standardization
+df = standardize_column_names(df)
 # Text normalization
 for column, dtype in df.dtypes:
     if dtype == "string":
         df = df.withColumn(column, trim(upper(col(column))))
-
 # Explicit type casting for product key
 if "product_code" in df.columns:
     df = df.withColumn("product_code", col("product_code").cast(StringType()))
-
 # Identify price columns (if any exist in product master)
 price_cols = [c for c in df.columns if "price" in c or "precio" in c or "valor" in c]
-
 # Price validation: must be > 0 (unified criteria), round to 2 decimals
 for price_col in price_cols:
     df = df.withColumn(
         price_col,
         when(col(price_col).isNull(), lit(None))
-        .when(col(price_col) <= 0, lit(None))  # Prices must be strictly positive
+        .when(col(price_col) <= 0, lit(None))  # Strictly positive for all
         .otherwise(spark_round(col(price_col).cast(DoubleType()), 2))
     )
-
-# Deduplication: Keep most recent record by product code (deterministic)
-# Business key: product_code
-if "product_code" in df.columns and "bronze_ingestion_timestamp" in df.columns:
-    window = Window.partitionBy("product_code").orderBy(col("bronze_ingestion_timestamp").desc_nulls_last())
-    df = df.withColumn("_rn", row_number().over(window)).filter(col("_rn") == 1).drop("_rn")
-elif "product_code" in df.columns:
-    # Fallback: deterministic ordering by all columns
-    window = Window.partitionBy("product_code").orderBy([col(c) for c in sorted(df.columns) if c != "product_code"])
-    df = df.withColumn("_rn", row_number().over(window)).filter(col("_rn") == 1).drop("_rn")
-
 # Filter: Remove records where product code is null (critical business field)
 if "product_code" in df.columns:
     df = df.filter(col("product_code").isNotNull())
 
 # Audit columns
 df = df.withColumn("processing_date", current_date()) \
-       .withColumn("processing_timestamp", current_timestamp())
+    .withColumn("processing_timestamp", current_timestamp())
+
+# Logging
+log_data_quality(df, "silver_master_products", price_cols=price_cols)
 
 # Write to Silver
 # Note: overwriteSchema=false for schema stability in production
@@ -354,20 +369,11 @@ df.write \
 # Read from Bronze (partitioned table)
 df_bronze = spark.read.table(BRONZE_PRICE_AUDIT)
 
+
 # Drop Bronze audit columns
-df = df_bronze.drop("ingestion_timestamp", "source_file", "ingestion_date")
-
+df = df_bronze.drop("_metadata_ingestion_timestamp", "_metadata_source_file", "_metadata_ingestion_date", "_metadata_batch_id")
 # Schema standardization: snake_case
-column_mapping = {}
-for c in df.columns:
-    if c == "year_month":  # Preserve partition column
-        continue
-    new_name = c.lower().strip().replace(" ", "_").replace("-", "_").replace("(", "").replace(")", "")
-    new_name = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in new_name)
-    column_mapping[c] = new_name
-
-for old_name, new_name in column_mapping.items():
-    df = df.withColumnRenamed(old_name, new_name)
+df = standardize_column_names(df, exclude_cols=["year_month"])
 
 # Explicit column identification (avoid dynamic detection risks)
 # Known columns after standardization: price, date, pdv/store codes, product codes
@@ -402,9 +408,13 @@ if critical_cols:
         filter_condition = filter_condition | col(c).isNotNull()
     df = df.filter(filter_condition)
 
+
 # Audit columns
 df = df.withColumn("processing_date", current_date()) \
-       .withColumn("processing_timestamp", current_timestamp())
+    .withColumn("processing_timestamp", current_timestamp())
+
+# Logging
+log_data_quality(df, "silver_price_audit", price_cols=price_cols, date_cols=date_cols)
 
 # Write to Silver (preserve partitioning)
 # Note: overwriteSchema removed - incompatible with dynamic partition overwrite
@@ -465,20 +475,11 @@ df.write \
 # Read from Bronze (partitioned by year)
 df_bronze = spark.read.table(BRONZE_SELL_IN)
 
+
 # Drop Bronze audit columns
-df = df_bronze.drop("ingestion_timestamp", "source_file", "ingestion_date")
-
+df = df_bronze.drop("_metadata_ingestion_timestamp", "_metadata_source_file", "_metadata_ingestion_date", "_metadata_batch_id")
 # Schema standardization: snake_case
-column_mapping = {}
-for c in df.columns:
-    if c == "year":  # Preserve partition column
-        continue
-    new_name = c.lower().strip().replace(" ", "_").replace("-", "_").replace("(", "").replace(")", "")
-    new_name = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in new_name)
-    column_mapping[c] = new_name
-
-for old_name, new_name in column_mapping.items():
-    df = df.withColumnRenamed(old_name, new_name)
+df = standardize_column_names(df, exclude_cols=["year"])
 
 # Identify quantity and value columns
 qty_cols = [c for c in df.columns if "quantity" in c or "cantidad" in c or "qty" in c]
@@ -511,14 +512,35 @@ if qty_cols and value_cols:
         .otherwise(lit(False))
     )
 
-# Derived column: unit_price (value / quantity)
+# Derived column: unit_price (value / quantity) with null checks
 if qty_cols and value_cols:
     df = df.withColumn(
         "unit_price",
-        when((col(qty_cols[0]) > 0) & (col(value_cols[0]) > 0),
-             spark_round(col(value_cols[0]) / col(qty_cols[0]), 2))
-        .otherwise(lit(None))
+        when(
+            col(qty_cols[0]).isNotNull() & col(value_cols[0]).isNotNull() &
+            (col(qty_cols[0]) > 0) & (col(value_cols[0]) > 0),
+            spark_round(col(value_cols[0]) / col(qty_cols[0]), 2)
+        ).otherwise(lit(None))
     )
+# --- Data Quality Metrics Logging ---
+def log_data_quality(df, table_name, price_cols=None, date_cols=None):
+    total_records = df.count()
+    invalid_prices = 0
+    invalid_dates = 0
+    if price_cols:
+        invalid_prices = df.filter(
+            sum([col(c).isNull().cast("int") for c in price_cols]) > 0
+        ).count()
+    if date_cols:
+        invalid_dates = df.filter(
+            sum([col(c).isNull().cast("int") for c in date_cols]) > 0
+        ).count()
+    print(f"✅ {table_name} Quality Metrics:")
+    print(f"   Total: {total_records:,}")
+    if price_cols:
+        print(f"   Invalid Prices: {invalid_prices:,} ({invalid_prices/total_records*100 if total_records else 0:.1f}%)")
+    if date_cols:
+        print(f"   Invalid Dates: {invalid_dates:,} ({invalid_dates/total_records*100 if total_records else 0:.1f}%)")
 
 # Derived column: is_active_sale (quantity > 0)
 if qty_cols:
@@ -536,9 +558,13 @@ for date_col in date_cols:
 if date_cols:
     df = df.withColumn("transaction_month", month(col(date_cols[0])))
 
+
 # Audit columns
 df = df.withColumn("processing_date", current_date()) \
-       .withColumn("processing_timestamp", current_timestamp())
+    .withColumn("processing_timestamp", current_timestamp())
+
+# Logging
+log_data_quality(df, "silver_sell_in", price_cols=value_cols, date_cols=date_cols)
 
 # Write to Silver (preserve year partitioning)
 # Note: overwriteSchema removed - incompatible with dynamic partition overwrite
@@ -642,6 +668,18 @@ for table_name, table_full_name in silver_tables.items():
 # MAGIC 
 # MAGIC ---
 # MAGIC 
+
+# ---
+# Post-write: Run Silver Drift Monitoring (Serverless-friendly, metadata-only)
+import sys
+sys.path.append("../monitoring")
+try:
+    from silver_drift_monitoring import run_silver_drift_monitoring
+    run_silver_drift_monitoring(spark)
+    print("✅ Silver drift monitoring completed.")
+except Exception as e:
+    print(f"⚠️ Drift monitoring failed: {e}")
+
 # MAGIC **Author:** Diego Mayorga | diego.mayorgacapera@gmail.com  
 # MAGIC **Date:** 2025-12-30  
 # MAGIC **Repository:** [github.com/DIEGO77M/BI_Market_Visibility](https://github.com/DIEGO77M/BI_Market_Visibility)

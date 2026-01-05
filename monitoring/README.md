@@ -9,7 +9,7 @@
 ```
 monitoring/
 ├── drift_monitoring_bronze.py    # Bronze layer schema drift detection
-├── drift_monitoring_silver.py    # [Future] Silver layer monitoring
+├── silver_drift_monitoring.py    # Silver layer drift monitoring (schema, quality, volume)
 ├── drift_monitoring_gold.py      # [Future] Gold layer monitoring
 └── README.md                      # This file
 ```
@@ -57,7 +57,7 @@ Schema drift occurs when the structure of source data changes unexpectedly:
 │                                                                 │
 │  Drift Detection → Compare Delta Versions → Generate Alerts    │
 │        ↓                                                        │
-│   Delta Tables (bronze_schema_alerts only)                     │
+│   Delta Tables (bronze_schema_alerts, silver_drift_history)    │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -65,6 +65,39 @@ Schema drift occurs when the structure of source data changes unexpectedly:
 - ✅ **Zero Coupling:** Pipelines don't know monitoring exists
 - ✅ **Single Source of Truth:** Delta History is authoritative
 - ✅ **No Custom Logging:** Delta automatically tracks schema changes
+
+---
+
+
+## 📊 Silver Layer Monitoring
+
+### Script: `silver_drift_monitoring.py`
+
+**Schedule:** After each Silver write (post-write hook, see Silver notebook)
+**Runtime:** ~1 minute (metadata-only, serverless-friendly)
+**Cluster:** Serverless (same as Silver pipeline)
+
+### What It Monitors
+
+| Table | Drift Types | Alert Behavior |
+|-------|------------|----------------|
+| All Silver tables | Schema drift (new/missing/type changes), Quality drift (null/invalid rates), Volume drift (row count, key cardinality) | Alert on HIGH/MEDIUM/LOW severity, log in audit table |
+
+### Severity Classification
+
+| Severity | Condition | Action Required |
+|----------|-----------|-----------------|
+| **HIGH** 🚨 | Critical column missing, type change, >50% row count drop | URGENT: Review Silver logic, check upstream, notify consumers |
+| **MEDIUM** ⚠️ | New column, moderate null/invalid increase, moderate volume change | WARNING: Review data quality, update documentation |
+| **LOW** ℹ️ | Minor changes, expected drift | INFO: Monitor, document |
+
+### Output Table
+
+**`silver_drift_history`** - Drift events with severity and details
+```sql
+SELECT * FROM workspace.default.silver_drift_history
+ORDER BY timestamp DESC;
+```
 
 ---
 
@@ -267,12 +300,13 @@ Bronze philosophy: **"Load first, validate later"**
 
 ## 🔮 Future Enhancements
 
+
 ### Phase 2: Silver & Gold Monitoring
 
 ```
 monitoring/
 ├── drift_monitoring_bronze.py    ✅ Implemented
-├── drift_monitoring_silver.py    🔜 Planned
+├── silver_drift_monitoring.py    ✅ Implemented
 └── drift_monitoring_gold.py      🔜 Planned
 ```
 
@@ -301,12 +335,13 @@ Power BI/SQL dashboard showing:
 3. Set alert preferences
 4. Test with manual run
 
+
 **Adding New Monitoring Layers:**
 
-1. Copy `drift_monitoring_bronze.py` → `drift_monitoring_silver.py`
-2. Update table references and layer name
-3. Adjust critical column definitions
-4. Add to Databricks workflow
+1. Copy `drift_monitoring_bronze.py` → `silver_drift_monitoring.py` (ya implementado)
+2. Actualiza referencias de tablas y lógica de drift según la capa
+3. Ajusta reglas de severidad y métricas de calidad
+4. Añade llamada post-write en el notebook correspondiente
 
 ---
 
