@@ -58,10 +58,18 @@ data/silver/**
 data/gold/**
 !data/gold/.gitkeep
 
-# Databricks
-.databricks/
+# Databricks - Ignore sensitive files but keep workflows
+.databricks/.databricks.env
+.databricks/bundle/
+.databricks/migration-config.json
+.databricks/.gitignore
 *.dbfs
 *.dbc
+
+# Keep workflows configuration
+!.databricks/
+!.databricks/workflows/
+!.databricks/workflows/*.yml
 
 # Environment variables
 .env
@@ -92,13 +100,3 @@ config.local.yaml
 # Logs
 *.log
 logs/
-
-.databricks
-
-.databricks
-
-.databricks
-
-.databricks
-
-.databricks
