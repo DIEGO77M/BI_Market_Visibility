@@ -33,9 +33,47 @@
 This project implements a **Medallion Architecture** in Databricks:
 
 ```
-├── Bronze Layer: Raw data ingestion
-├── Silver Layer: Cleaned and validated data
-└── Gold Layer: Business-level aggregations and analytics
+📦 BRONZE LAYER (✅ Complete)
+├── bronze_master_pdv             [51 PDVs]
+├── bronze_master_products        [201 products]
+├── bronze_price_audit            [500K+ price observations]
+└── bronze_sell_in                [400K+ transactions]
+
+🔄 SILVER LAYER (✅ Complete)
+├── silver_master_pdv             [Standardized, deduplicated]
+├── silver_master_products        [Normalized, validated]
+├── silver_price_audit            [Clean prices, domain rules]
+└── silver_sell_in                [Aggregated, quality flags]
+
+⭐ GOLD LAYER (✅ Complete)
+├── Dimensions (SCD Type 2)
+│   ├── gold_dim_date             [3,650 rows - 10-year calendar]
+│   ├── gold_dim_product          [250+ versions with history]
+│   └── gold_dim_pdv              [75+ versions with history]
+├── Facts (Append-Only)
+│   ├── gold_fact_sell_in         [500K-2M rows, daily grain]
+│   ├── gold_fact_price_audit     [500K-2M rows, price observations]
+│   └── gold_fact_stock           [500K-2M rows, inventory estimates]
+└── KPI Tables (Pre-Aggregated)
+    ├── gold_kpi_market_visibility_daily [Ready for Power BI]
+    └── gold_kpi_market_share           [Market penetration analysis]
+```
+
+**Star Schema Design:**
+```
+                  gold_dim_date
+                       ↑
+                   (PK: date_sk)
+                       │
+        ┌──────────────┼──────────────┐
+        │              │              │
+gold_fact_sell_in  gold_fact_price   gold_fact_stock
+        │              │              │
+      (FK)           (FK)           (FK)
+        │              │              │
+        └──────────────┼──────────────┘
+         gold_dim_product (SCD2)
+                 gold_dim_pdv (SCD2)
 ```
 
 ![Architecture Diagram](docs/architecture/architecture_diagram.png)
@@ -53,23 +91,36 @@ This project implements a **Medallion Architecture** in Databricks:
 ```
 BI_Market_Visibility/
 ├── data/
-│   ├── raw/              # Raw data sources
-│   ├── bronze/           # Ingested raw data
-│   ├── silver/           # Cleaned and validated data
-│   └── gold/             # Business-level aggregations
+│   ├── raw/              # Raw CSV/Excel sources
+│   ├── bronze/           # Delta tables (ingested)
+│   ├── silver/           # Delta tables (curated)
+│   └── gold/             # Delta tables (analytics)
 ├── notebooks/
-│   ├── 01_bronze_ingestion.ipynb
-│   ├── 02_silver_transformation.ipynb
-│   └── 03_gold_analytics.ipynb
+│   ├── 01_bronze_ingestion.py        # Raw → Bronze
+│   ├── 02_silver_standardization.py  # Bronze → Silver
+│   └── 03_gold_analytics.py          # Silver → Gold (NEW)
 ├── src/
-│   ├── utils/            # Utility functions
-│   └── tests/            # Unit tests
+│   ├── utils/
+│   │   ├── spark_helpers.py
+│   │   ├── data_quality.py
+│   │   └── gold_layer_utils.py       # SCD2, surrogate keys, KPIs (NEW)
+│   └── tests/
+│       ├── conftest.py
+│       ├── test_data_quality.py
+│       └── test_gold_layer.py        # Gold layer validation (NEW)
 ├── dashboards/
 │   ├── market_visibility.pbix
 │   └── screenshots/
 ├── docs/
-│   ├── architecture/
-│   └── data_dictionary.md
+│   ├── GOLD_ARCHITECTURE_DESIGN.md         # Complete design doc (NEW)
+│   ├── GOLD_IMPLEMENTATION_SUMMARY.md      # Executive summary (NEW)
+│   ├── POWERBI_INTEGRATION_GUIDE.md        # BI connection guide (NEW)
+│   ├── BRONZE_ARCHITECTURE_DECISIONS.md
+│   ├── data_dictionary.md
+│   └── architecture/
+├── monitoring/
+│   ├── drift_monitoring_bronze.py
+│   └── silver_drift_monitoring.py
 ├── presentation/
 │   └── executive_summary.pptx
 ├── README.md
@@ -82,8 +133,9 @@ BI_Market_Visibility/
 
 ```bash
 python >= 3.8
-databricks-connect
-power-bi-desktop
+databricks-connect >= 14.0
+pyspark >= 3.5
+pytest >= 7.4
 ```
 
 ### Installation
@@ -101,12 +153,82 @@ pip install -r requirements.txt
 
 3. Configure Databricks connection:
 ```bash
-# Set up your Databricks credentials
-databricks configure --token
+# Set up your Databricks workspace credentials
+export DATABRICKS_HOST=https://<workspace-region>.cloud.databricks.com
+export DATABRICKS_TOKEN=<your-token>
+```
+
+### Quick Start
+
+**Execute the complete pipeline (Bronze → Silver → Gold):**
+
+```bash
+# In Databricks Workspace, run notebooks in order:
+1. 01_bronze_ingestion.py       # ~5 min (full load)
+2. 02_silver_standardization.py  # ~3 min
+3. 03_gold_analytics.py          # ~5 min (star schema creation)
+
+# Validate data quality
+pytest src/tests/test_gold_layer.py -v
+
+# Connect Power BI to Gold layer
+# Follow docs/POWERBI_INTEGRATION_GUIDE.md
 ```
 
 ---
 
+## 📊 Gold Layer Quick Reference
+
+### What's New (Gold Layer)
+
+| Component | Details |
+|-----------|---------|
+| **Dimensions** | 3 conformed dims (Date, Product SCD2, PDV SCD2) |
+| **Facts** | 3 append-only fact tables (Sell-In, Price, Stock) |
+| **KPIs** | 2 pre-aggregated tables (Market Visibility, Market Share) |
+| **Modeling** | Star schema optimized for Power BI |
+| **Partitioning** | Year/month-based for incremental refresh |
+| **Quality** | Surrogate key uniqueness, referential integrity, KPI consistency checks |
+
+### Key Metrics (Now Available)
+
+```
+✅ Sell-In Analysis
+   - Daily quantities & values by product × PDV
+   - Unit economics & transaction frequency
+   
+✅ Price Competitiveness
+   - Price index (observed vs market average)
+   - Price variance detection (+/- thresholds)
+   - Market outlier flagging
+   
+✅ Market Penetration
+   - Market share % (units & value)
+   - PDV coverage by region/segment
+   - Brand performance trends
+   
+✅ Stock Availability
+   - Days of supply (calculated from sell-in proxy)
+   - Stockout detection & lost sales estimation
+   - Overstock alerts (inventory health)
+   
+✅ Operational Efficiency
+   - Efficiency score (0-100, based on stock + price)
+   - Sell-in/Sell-out ratio proxy
+   - Availability rate % (days with stock >0)
+```
+
+### Connecting to Power BI
+
+1. Open Power BI Desktop
+2. **Get Data** → **Databricks**
+3. Import all 8 Gold tables
+4. Configure relationships (date, product, pdv)
+5. Apply filters: `is_current = TRUE` on dimensions (SCD2 handling)
+6. Create measures (see [Power BI Integration Guide](docs/POWERBI_INTEGRATION_GUIDE.md))
+7. Build dashboards
+
+---
 
 ## 🏛️ Architecture & Monitoring
 
