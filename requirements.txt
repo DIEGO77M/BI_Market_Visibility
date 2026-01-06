@@ -1,30 +1,19 @@
 # Core Data Processing
-pyspark==3.5.0
-databricks-connect==14.0.0
-pandas==2.1.4
-numpy==1.26.2
+pyspark>=3.5.0
+databricks-connect>=14.0.0
+pandas>=2.0.0
+numpy>=1.24.0
 
-# Data Quality & Validation
-great-expectations==0.18.8
+# Excel Processing (Bronze layer)
+openpyxl>=3.1.0
 
 # Testing
-pytest==7.4.3
-pytest-cov==4.1.0
+pytest>=7.4.0
+pytest-cov>=4.1.0
 
 # Utilities
-python-dotenv==1.0.0
-pyyaml==6.0.1
+python-dotenv>=1.0.0
 
-# Development
-black==23.12.1
-flake8==7.0.0
-mypy==1.7.1
-
-# Visualization (for notebooks)
-matplotlib==3.8.2
-seaborn==0.13.0
-plotly==5.18.0
-
-# Jupyter
-jupyter==1.0.0
-ipykernel==6.27.1
+# Development (optional)
+black>=23.0.0
+flake8>=7.0.0

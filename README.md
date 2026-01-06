@@ -55,27 +55,25 @@ Sell-In         →     Sell-In Validated →      gold_fact_sell_in
 
 ```
 BI_Market_Visibility/
-├── notebooks/
-│   ├── 01_bronze_ingestion.py         # Raw → Delta (2-4 min)
-│   ├── 02_silver_standardization.py   # Clean & validate (3 min)
-│   └── 03_gold_analytics.py           # Star schema (5 min) ✨ NEW
+├── notebooks/                 # Databricks notebooks (Bronze→Silver→Gold)
+│   ├── 01_bronze_ingestion.py
+│   ├── 02_silver_standardization.py
+│   └── 03_gold_analytics.py
 ├── src/
-│   ├── utils/
+│   ├── utils/                 # Reusable Python modules
 │   │   ├── data_quality.py
 │   │   ├── spark_helpers.py
-│   │   └── gold_layer_utils.py        # SCD2, surrogate keys ✨ NEW
-│   └── tests/
-│       └── test_gold_layer.py         # 40+ assertions ✨ NEW
-├── docs/
-│   ├── GOLD_ARCHITECTURE_DESIGN.md    # Design + 9 ADRs
-│   ├── SILVER_ARCHITECTURE_DECISIONS.md # Silver ADRs ✨ NEW
-│   ├── POWERBI_INTEGRATION_GUIDE.md   # Connection guide
-│   ├── GOLD_IMPLEMENTATION_SUMMARY.md # Executive summary
+│   │   └── gold_layer_utils.py
+│   └── tests/                 # pytest unit tests
+│       └── test_gold_layer.py
+├── docs/                      # Architecture Decision Records (ADRs)
 │   ├── BRONZE_ARCHITECTURE_DECISIONS.md
-│   ├── data_dictionary.md
-│   └── architecture/
-├── dashboards/
-│   └── screenshots/
+│   ├── SILVER_ARCHITECTURE_DECISIONS.md
+│   ├── GOLD_ARCHITECTURE_DESIGN.md
+│   ├── POWERBI_INTEGRATION_GUIDE.md
+│   └── data_dictionary.md
+├── dashboards/                # Power BI files & screenshots
+├── data/                      # Local samples (production in Unity Catalog)
 ├── requirements.txt
 ├── databricks.yml
 └── LICENSE
@@ -116,12 +114,11 @@ pyspark >= 3.5
 
 | Document | Content |
 |----------|---------|
-| [BRONZE_ARCHITECTURE_DECISIONS.md](docs/BRONZE_ARCHITECTURE_DECISIONS.md) | Bronze layer ADRs |
-| [SILVER_ARCHITECTURE_DECISIONS.md](docs/SILVER_ARCHITECTURE_DECISIONS.md) | Silver layer ADRs ✨ NEW |
-| [GOLD_ARCHITECTURE_DESIGN.md](docs/GOLD_ARCHITECTURE_DESIGN.md) | Gold layer design + 9 ADRs |
-| [POWERBI_INTEGRATION_GUIDE.md](docs/POWERBI_INTEGRATION_GUIDE.md) | BI connection + DAX |
-| [GOLD_IMPLEMENTATION_SUMMARY.md](docs/GOLD_IMPLEMENTATION_SUMMARY.md) | Executive summary |
-| [data_dictionary.md](docs/data_dictionary.md) | Schema definitions |
+| [BRONZE_ARCHITECTURE_DECISIONS.md](docs/BRONZE_ARCHITECTURE_DECISIONS.md) | Bronze layer ADRs (5 decisions) |
+| [SILVER_ARCHITECTURE_DECISIONS.md](docs/SILVER_ARCHITECTURE_DECISIONS.md) | Silver layer ADRs (9 decisions) |
+| [GOLD_ARCHITECTURE_DESIGN.md](docs/GOLD_ARCHITECTURE_DESIGN.md) | Gold layer design + ADRs (9 decisions) |
+| [POWERBI_INTEGRATION_GUIDE.md](docs/POWERBI_INTEGRATION_GUIDE.md) | BI connection setup + DAX measures |
+| [data_dictionary.md](docs/data_dictionary.md) | Schema definitions for all 16 tables |
 
 ## 🧪 Testing
 
