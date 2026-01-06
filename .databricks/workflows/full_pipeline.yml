@@ -1,11 +1,20 @@
 # =============================================================================
-# FULL PIPELINE - END-TO-END SERVERLESS ORCHESTRATION
+# FULL PIPELINE - END-TO-END SERVERLESS ORCHESTRATION (SIMPLIFIED)
 # =============================================================================
 # 
 # Purpose: Complete Medallion Architecture pipeline (Bronze → Silver → Gold)
 # Author: Diego Mayorga
 # Date: 2026-01-06
 # Compute: Serverless (workspace requirement)
+# 
+# Design Decision: Use Gold Orchestrator instead of individual notebooks
+# Rationale: 
+#   - Orchestrator already validated for Serverless compatibility
+#   - Reduces complexity from 12 tasks to 3 tasks
+#   - Single point of failure for Gold layer (easier debugging)
+#   - Orchestrator handles internal dependencies
+#
+# Trade-off: Sacrifices parallel dimension execution for simplicity/reliability
 # 
 # =============================================================================
 
@@ -15,7 +24,7 @@ resources:
       name: "Full Pipeline - Bronze to Gold"
       description: |
         Complete end-to-end Medallion Architecture pipeline (Serverless)
-        Executes all layers in sequence with proper dependencies
+        Simplified: Bronze → Silver → Gold Orchestrator (3 tasks)
       
       tags:
         project: "BI_Market_Visibility"
@@ -37,7 +46,7 @@ resources:
       # ─────────────────────────────────────────────────────────────────────
       # TIMEOUT POLICY
       # ─────────────────────────────────────────────────────────────────────
-      timeout_seconds: 14400  # 4 hours max for full pipeline
+      timeout_seconds: 10800  # 3 hours max (reduced from 4h due to simpler flow)
       
       # ─────────────────────────────────────────────────────────────────────
       # SCHEDULE: Weekly on Sunday at 2 AM (full refresh)
@@ -48,42 +57,30 @@ resources:
         pause_status: "PAUSED"
       
       # ═══════════════════════════════════════════════════════════════════════
-      # TASK DEFINITIONS - COMPLETE DAG (Serverless Compute)
+      # TASK DEFINITIONS - SIMPLIFIED DAG (Serverless Compute)
       # ═══════════════════════════════════════════════════════════════════════
       #
-      # Execution Flow:
+      # Simplified Execution Flow (3 tasks instead of 12):
       #
-      #   ┌─────────────────┐
-      #   │ bronze_ingestion│  ← PHASE 1
-      #   └────────┬────────┘
-      #            │
-      #   ┌────────▼────────┐
-      #   │silver_standard  │  ← PHASE 2
-      #   └────────┬────────┘
-      #            │
-      #   ┌────────┼────────┬────────┐
-      #   ▼        ▼        ▼        │
-      # dim_date dim_prod dim_pdv   │  ← PHASE 3
-      #   │        │        │        │
-      #   └────────┼────────┘        │
-      #            │                 │
-      #   ┌────────┼────────┐        │
-      #   ▼        ▼        ▼        │
-      # fact_si  fact_pa  fact_st   │  ← PHASE 4
-      #   │        │        │        │
-      #   └────────┼────────┘        │
-      #            │                 │
-      #   ┌────────▼────────┐        │
-      #   │ kpi_visibility  │        │  ← PHASE 5
-      #   └────────┬────────┘        │
-      #            │                 │
-      #   ┌────────▼────────┐        │
-      #   │ kpi_mkt_share   │        │
-      #   └────────┬────────┘        │
-      #            │                 │
-      #   ┌────────▼────────┐        │
-      #   │   validation    │        │  ← PHASE 6
-      #   └─────────────────┘        │
+      #   ┌─────────────────────┐
+      #   │  bronze_ingestion   │  ← PHASE 1: Raw data ingestion
+      #   │  (~3-4 min)         │
+      #   └──────────┬──────────┘
+      #              │
+      #   ┌──────────▼──────────┐
+      #   │silver_standardization│  ← PHASE 2: Cleaning & validation
+      #   │  (~3 min)           │
+      #   └──────────┬──────────┘
+      #              │
+      #   ┌──────────▼──────────┐
+      #   │  gold_orchestrator  │  ← PHASE 3: All Gold tables
+      #   │  (~8-10 min)        │     - 3 Dimensions (date, product, pdv)
+      #   │                     │     - 3 Facts (sell_in, price_audit, stock)
+      #   │                     │     - 2 KPIs (visibility, market_share)
+      #   │                     │     - Validation (read-only checks)
+      #   └─────────────────────┘
+      #
+      # Total estimated runtime: ~15-20 minutes
       #
       # ═══════════════════════════════════════════════════════════════════════
       
@@ -92,119 +89,49 @@ resources:
         # PHASE 1: BRONZE INGESTION
         # ─────────────────────────────────────────────────────────────────────
         - task_key: "bronze_ingestion"
-          description: "Ingest raw data from sources into Bronze Delta tables"
+          description: |
+            Ingest raw data from sources into Bronze Delta tables.
+            Sources: CSV (semicolon/comma), Excel (.xlsx)
+            Tables: bronze_master_pdv, bronze_master_products, 
+                    bronze_price_audit, bronze_sell_in
           notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/bronze/01_bronze_ingestion"
+            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/notebooks/bronze/01_bronze_ingestion"
             source: "WORKSPACE"
-          timeout_seconds: 1800
+          timeout_seconds: 1800  # 30 min max
         
         # ─────────────────────────────────────────────────────────────────────
         # PHASE 2: SILVER STANDARDIZATION
         # ─────────────────────────────────────────────────────────────────────
         - task_key: "silver_standardization"
-          description: "Transform Bronze to Silver with standardization"
+          description: |
+            Transform Bronze to Silver with standardization.
+            Operations: Deduplication, snake_case, quality flags
+            Tables: silver_master_pdv, silver_master_products,
+                    silver_price_audit, silver_sell_in
           depends_on:
             - task_key: "bronze_ingestion"
           notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/silver/02_silver_standardization"
+            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/notebooks/silver/02_silver_standardization"
             source: "WORKSPACE"
-          timeout_seconds: 2400
+          timeout_seconds: 2400  # 40 min max
         
         # ─────────────────────────────────────────────────────────────────────
-        # PHASE 3: GOLD DIMENSIONS (Parallel)
+        # PHASE 3: GOLD ORCHESTRATOR (All Gold tables in one execution)
         # ─────────────────────────────────────────────────────────────────────
-        - task_key: "gold_dim_date"
-          description: "Calendar dimension (static, 10-year range)"
+        - task_key: "gold_orchestrator"
+          description: |
+            Execute complete Gold layer via orchestrator.
+            Handles internal dependencies and execution order.
+            Tables created:
+              - Dimensions: gold_dim_date, gold_dim_product, gold_dim_pdv
+              - Facts: gold_fact_sell_in, gold_fact_price_audit, gold_fact_stock
+              - KPIs: gold_kpi_market_visibility, gold_kpi_market_share
+            Includes: Post-execution validation (referential integrity)
           depends_on:
             - task_key: "silver_standardization"
           notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/gold/dimensions/gold_dim_date"
+            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/notebooks/gold/03_gold_orchestrator"
             source: "WORKSPACE"
-          timeout_seconds: 600
-        
-        - task_key: "gold_dim_product"
-          description: "Product dimension with SCD Type 2"
-          depends_on:
-            - task_key: "silver_standardization"
-          notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/gold/dimensions/gold_dim_product"
-            source: "WORKSPACE"
-          timeout_seconds: 900
-        
-        - task_key: "gold_dim_pdv"
-          description: "Point of Sale dimension with SCD Type 2"
-          depends_on:
-            - task_key: "silver_standardization"
-          notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/gold/dimensions/gold_dim_pdv"
-            source: "WORKSPACE"
-          timeout_seconds: 900
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # PHASE 4: GOLD FACTS (After dimensions)
-        # ─────────────────────────────────────────────────────────────────────
-        - task_key: "gold_fact_sell_in"
-          description: "Sell-in fact table with dimension keys"
-          depends_on:
-            - task_key: "gold_dim_date"
-            - task_key: "gold_dim_product"
-            - task_key: "gold_dim_pdv"
-          notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/gold/facts/gold_fact_sell_in"
-            source: "WORKSPACE"
-          timeout_seconds: 1800
-        
-        - task_key: "gold_fact_price_audit"
-          description: "Price audit fact table"
-          depends_on:
-            - task_key: "gold_dim_date"
-            - task_key: "gold_dim_product"
-            - task_key: "gold_dim_pdv"
-          notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/gold/facts/gold_fact_price_audit"
-            source: "WORKSPACE"
-          timeout_seconds: 1800
-        
-        - task_key: "gold_fact_stock"
-          description: "Stock estimation fact table"
-          depends_on:
-            - task_key: "gold_fact_sell_in"
-          notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/gold/facts/gold_fact_stock"
-            source: "WORKSPACE"
-          timeout_seconds: 1800
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # PHASE 5: GOLD KPIs (After facts)
-        # ─────────────────────────────────────────────────────────────────────
-        - task_key: "gold_kpi_market_visibility"
-          description: "Daily market visibility KPIs"
-          depends_on:
-            - task_key: "gold_fact_sell_in"
-            - task_key: "gold_fact_price_audit"
-            - task_key: "gold_fact_stock"
-          notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/gold/kpis/gold_kpi_market_visibility"
-            source: "WORKSPACE"
-          timeout_seconds: 2400
-        
-        - task_key: "gold_kpi_market_share"
-          description: "Market share analysis KPIs"
-          depends_on:
-            - task_key: "gold_kpi_market_visibility"
-          notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/gold/kpis/gold_kpi_market_share"
-            source: "WORKSPACE"
-          timeout_seconds: 1800
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # PHASE 6: VALIDATION
-        # ─────────────────────────────────────────────────────────────────────
-        - task_key: "gold_validation"
-          description: "Data quality validation using Delta metadata"
-          depends_on:
-            - task_key: "gold_kpi_market_share"
-          notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/gold/validation/gold_validation"
-            source: "WORKSPACE"
-          timeout_seconds: 600
+            base_parameters:
+              execute_pipeline: "yes"
+          timeout_seconds: 3600  # 60 min max for all Gold operations

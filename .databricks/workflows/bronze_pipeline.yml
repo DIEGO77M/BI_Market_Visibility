@@ -53,7 +53,7 @@ resources:
         - task_key: "bronze_ingestion"
           description: "Ingest raw data from CSV sources into Bronze Delta tables"
           notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/bronze/01_bronze_ingestion"
+            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/notebooks/bronze/01_bronze_ingestion"
             source: "WORKSPACE"
           timeout_seconds: 1800
         
@@ -62,6 +62,6 @@ resources:
           depends_on:
             - task_key: "bronze_ingestion"
           notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/monitoring/drift_monitoring_bronze"
+            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/monitoring/drift_monitoring_bronze"
             source: "WORKSPACE"
           timeout_seconds: 600

@@ -53,7 +53,7 @@ resources:
         - task_key: "silver_standardization"
           description: "Transform all Bronze tables to Silver with standardization"
           notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/silver/02_silver_standardization"
+            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/notebooks/silver/02_silver_standardization"
             source: "WORKSPACE"
           timeout_seconds: 2400
         
@@ -62,6 +62,6 @@ resources:
           depends_on:
             - task_key: "silver_standardization"
           notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/monitoring/silver_drift_monitoring"
+            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/monitoring/silver_drift_monitoring"
             source: "WORKSPACE"
           timeout_seconds: 600

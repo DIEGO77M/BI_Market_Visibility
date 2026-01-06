@@ -1,25 +1,28 @@
-# Silver Layer - Lightweight Drift Monitoring
-# Test: Workflow CI/CD sync - 2026-01-05
-# Author: Diego Mayorga
-# Date: 2026-01-05
-# Project: BI Market Visibility Analysis
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # Silver Layer - Lightweight Drift Monitoring
+# MAGIC 
+# MAGIC **Author:** Diego Mayorga  
+# MAGIC **Date:** 2026-01-05  
+# MAGIC **Project:** BI Market Visibility Analysis
+# MAGIC 
+# MAGIC This notebook implements lightweight drift monitoring for the Silver layer.
+# MAGIC It enforces soft data contracts and protects downstream Gold/BI layers by detecting:
+# MAGIC - Schema drift (new/missing columns, data type changes)
+# MAGIC - Quality drift (null rates, invalid records, quality flags)
+# MAGIC - Volume drift (row count, key cardinality changes)
+# MAGIC 
+# MAGIC All operations are metadata-only or use existing Silver logs/metrics (Serverless-friendly).
+# MAGIC Drift events are logged in a Delta audit table with severity (HIGH/MEDIUM/LOW).
 
-"""
-This script implements lightweight drift monitoring for the Silver layer.
-It enforces soft data contracts and protects downstream Gold/BI layers by detecting:
-- Schema drift (new/missing columns, data type changes)
-- Quality drift (null rates, invalid records, quality flags)
-- Volume drift (row count, key cardinality changes)
-
-All operations are metadata-only or use existing Silver logs/metrics (Serverless-friendly).
-Drift events are logged in a Delta audit table with severity (HIGH/MEDIUM/LOW).
-No pipeline blocking: only observability and early detection.
-"""
+# COMMAND ----------
 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, lit, current_timestamp
 from pyspark.sql.types import StringType, StructType, StructField, TimestampType, IntegerType, DoubleType
 import json
+
+# COMMAND ----------
 
 # --- Config ---
 CATALOG = "workspace"
@@ -32,10 +35,13 @@ SILVER_TABLES = [
 ]
 AUDIT_TABLE = f"{CATALOG}.{SCHEMA}.silver_drift_history"
 
+# COMMAND ----------
+
 # --- Utility: Get current schema as dict ---
 def get_table_schema(spark, table):
     schema = spark.table(table).schema
     return {f.name: str(f.dataType) for f in schema.fields}
+
 
 # --- Utility: Get Delta History metrics ---
 def get_delta_history_metrics(spark, table):
@@ -46,6 +52,7 @@ def get_delta_history_metrics(spark, table):
         "numFiles": int(metrics.get("numFiles", 0)),
         "timestamp": hist["timestamp"]
     }
+
 
 # --- Utility: Load baseline (from audit table or static) ---
 def load_baseline(spark, table):
@@ -160,6 +167,17 @@ def run_silver_drift_monitoring(spark):
         # 8. Update baseline (always store latest)
         # (In this lightweight version, baseline is always the last run)
 
-if __name__ == "__main__":
-    spark = SparkSession.builder.getOrCreate()
-    run_silver_drift_monitoring(spark)
+# COMMAND ----------
+
+# Execute drift monitoring
+run_silver_drift_monitoring(spark)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Results
+# MAGIC 
+# MAGIC Check the drift audit table for any detected issues:
+# MAGIC ```sql
+# MAGIC SELECT * FROM workspace.default.silver_drift_history ORDER BY timestamp DESC LIMIT 10;
+# MAGIC ```

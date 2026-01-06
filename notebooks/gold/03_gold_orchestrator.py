@@ -472,6 +472,24 @@ def validate_gold_layer(spark):
     
     print("=" * 60)
 
+
+def get_conf_safe(key: str, default: str = "N/A") -> str:
+    """
+    Safely get Spark configuration value with fallback default.
+    Prevents CONFIG_NOT_AVAILABLE errors in Databricks.
+    
+    Args:
+        key: Configuration key name
+        default: Default value if key not found
+        
+    Returns:
+        Configuration value or default
+    """
+    try:
+        return spark.conf.get(key)
+    except:
+        return default
+
 # COMMAND ----------
 
 # MAGIC %md
@@ -494,6 +512,16 @@ PIPELINE_CONFIG = {
     "run_validation": True,
     "stop_on_error": True,
     "parallel_dimensions": False  # Set True if cluster allows parallelism
+}
+
+# Pipeline State (Python memory - NOT Spark conf)
+# This avoids CONFIG_NOT_AVAILABLE errors in Databricks
+PIPELINE_STATE = {
+    "status": "NOT_EXECUTED",
+    "duration": 0,
+    "last_check": datetime.now().isoformat(),
+    "notebooks_success": 0,
+    "notebooks_failed": 0
 }
 
 # Notebook execution phases (dependency order)
@@ -753,6 +781,9 @@ RUN_PIPELINE = False  # Set True for hardcoded auto-execution
 # Execute if either widget or flag is True
 should_run = WIDGET_RUN_PIPELINE or RUN_PIPELINE
 
+# Update last check timestamp
+PIPELINE_STATE["last_check"] = datetime.now().isoformat()
+
 if should_run:
     print("\n" + "🤖" * 30)
     print("   AUTOMATIC PIPELINE EXECUTION TRIGGERED")
@@ -763,9 +794,11 @@ if should_run:
     # Execute the complete pipeline
     pipeline_result = execute_gold_pipeline()
     
-    # Store result for external access
-    spark.conf.set("gold.pipeline.status", pipeline_result["status"])
-    spark.conf.set("gold.pipeline.duration", str(pipeline_result["total_duration_seconds"]))
+    # Store result in Python memory (NOT Spark conf)
+    PIPELINE_STATE["status"] = pipeline_result["status"]
+    PIPELINE_STATE["duration"] = pipeline_result["total_duration_seconds"]
+    PIPELINE_STATE["notebooks_success"] = pipeline_result["notebooks_success"]
+    PIPELINE_STATE["notebooks_failed"] = pipeline_result["notebooks_failed"]
     
     # Exit with status for CI/CD and Databricks Workflows
     if pipeline_result["status"] != "SUCCESS":
@@ -780,6 +813,10 @@ else:
     print("\n📋 Pipeline not triggered. To execute:")
     print("   1. Set widget 'Execute Pipeline' = 'yes' and Run All, OR")
     print("   2. Set RUN_PIPELINE = True in the code above")
+    print(f"\n📊 Current Status:")
+    print(f"   - status: {PIPELINE_STATE['status']}")
+    print(f"   - duration: {PIPELINE_STATE['duration']}s")
+    print(f"   - last_check: {PIPELINE_STATE['last_check']}")
 
 # COMMAND ----------
 

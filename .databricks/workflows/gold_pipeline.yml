@@ -1,5 +1,5 @@
 # =============================================================================
-# GOLD LAYER PIPELINE - DATABRICKS SERVERLESS WORKFLOW
+# GOLD LAYER PIPELINE - SIMPLIFIED ORCHESTRATOR PATTERN
 # =============================================================================
 # 
 # Purpose: Star Schema ETL for analytical consumption
@@ -7,25 +7,35 @@
 # Date: 2026-01-06
 # Compute: Serverless (workspace requirement)
 # 
-# Execution Flow:
-#   Dimensions (parallel) → Facts (parallel) → KPIs → Validation
+# Strategy: Single task calls the orchestrator notebook which handles
+#           all phases internally (dimensions → facts → kpis → validation)
+#
+# Trade-off Decision:
+#   - Alternative A: YAML with 9 separate tasks (redundant with orchestrator)
+#   - Alternative B: Single task calling orchestrator (CHOSEN)
+#   - Gain: Centralized maintenance, widgets support, custom error handling
+#   - Sacrifice: Native Databricks parallel execution (mitigated by orchestrator)
 #
 # =============================================================================
 
 resources:
   jobs:
     gold_layer_pipeline:
-      name: "Gold Layer - Daily Pipeline"
+      name: "Gold Layer - Dimensional Model"
       description: |
-        Star Schema ETL pipeline (Serverless):
-        - SCD Type 2 dimensions (Product, PDV, Date)
-        - Incremental fact tables (Sell-In, Price Audit, Stock)
-        - Pre-aggregated KPIs (Market Visibility, Market Share)
-        - Zero-compute validation
+        Gold Layer pipeline via orchestrator notebook:
+        - Phase 1: Dimensions (Date, Product, PDV) with SCD Type 2
+        - Phase 2: Facts (Sell-In, Price Audit, Stock)
+        - Phase 3: KPIs (Market Visibility, Market Share)
+        - Phase 4: Validation (Zero-compute Delta metadata)
+        
+        The orchestrator handles sequencing, error handling, and metrics.
+        Supports widgets: run_pipeline, stop_on_error, run_validation
       
       tags:
         project: "BI_Market_Visibility"
         layer: "gold"
+        pattern: "orchestrator"
         owner: "diego.mayorgacapera@gmail.com"
       
       # ─────────────────────────────────────────────────────────────────────
@@ -52,122 +62,41 @@ resources:
         pause_status: "PAUSED"
       
       # ═══════════════════════════════════════════════════════════════════════
-      # TASK DEFINITIONS (Serverless Compute)
+      # SINGLE TASK - Orchestrator handles all phases internally
       # ═══════════════════════════════════════════════════════════════════════
       #
-      # DAG Structure:
+      # Internal Execution Flow (managed by orchestrator):
       #
       #   ┌──────────┐  ┌─────────────┐  ┌──────────┐
-      #   │ dim_date │  │ dim_product │  │ dim_pdv  │   ← PHASE 1 (Parallel)
+      #   │ dim_date │  │ dim_product │  │ dim_pdv  │   ← Phase 1
       #   └────┬─────┘  └──────┬──────┘  └────┬─────┘
       #        └───────────────┼──────────────┘
       #                        ▼
       #   ┌─────────────┐  ┌──────────────┐  ┌────────────┐
-      #   │fact_sell_in │  │fact_price_aud│  │ fact_stock │  ← PHASE 2
+      #   │fact_sell_in │  │fact_price_aud│  │ fact_stock │  ← Phase 2
       #   └──────┬──────┘  └──────┬───────┘  └─────┬──────┘
       #          └────────────────┼────────────────┘
       #                           ▼
       #   ┌──────────────────┐  ┌──────────────────┐
-      #   │kpi_mkt_visibility│  │ kpi_market_share │  ← PHASE 3
+      #   │kpi_mkt_visibility│  │ kpi_market_share │  ← Phase 3
       #   └────────┬─────────┘  └────────┬─────────┘
       #            └─────────────────────┘
       #                        ▼
       #              ┌──────────────────┐
-      #              │   validation     │  ← PHASE 4
+      #              │   validation     │  ← Phase 4
       #              └──────────────────┘
       #
       # ═══════════════════════════════════════════════════════════════════════
       
       tasks:
-        # ─────────────────────────────────────────────────────────────────────
-        # PHASE 1: DIMENSIONS (Parallel execution)
-        # ─────────────────────────────────────────────────────────────────────
-        - task_key: "gold_dim_date"
-          description: "Calendar dimension (static, 10-year range)"
+        - task_key: "gold_orchestrator"
+          description: "Execute complete Gold Layer pipeline via orchestrator"
           notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/gold/dimensions/gold_dim_date"
+            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/notebooks/gold/03_gold_orchestrator"
             source: "WORKSPACE"
-          timeout_seconds: 600
-          
-        - task_key: "gold_dim_product"
-          description: "Product dimension with SCD Type 2"
-          notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/gold/dimensions/gold_dim_product"
-            source: "WORKSPACE"
-          timeout_seconds: 900
-          
-        - task_key: "gold_dim_pdv"
-          description: "Point of Sale dimension with SCD Type 2"
-          notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/gold/dimensions/gold_dim_pdv"
-            source: "WORKSPACE"
-          timeout_seconds: 900
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # PHASE 2: FACTS (After dimensions)
-        # ─────────────────────────────────────────────────────────────────────
-        - task_key: "gold_fact_sell_in"
-          description: "Sell-in fact table with dimension keys"
-          depends_on:
-            - task_key: "gold_dim_date"
-            - task_key: "gold_dim_product"
-            - task_key: "gold_dim_pdv"
-          notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/gold/facts/gold_fact_sell_in"
-            source: "WORKSPACE"
-          timeout_seconds: 1800
-          
-        - task_key: "gold_fact_price_audit"
-          description: "Price audit fact table"
-          depends_on:
-            - task_key: "gold_dim_date"
-            - task_key: "gold_dim_product"
-            - task_key: "gold_dim_pdv"
-          notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/gold/facts/gold_fact_price_audit"
-            source: "WORKSPACE"
-          timeout_seconds: 1800
-          
-        - task_key: "gold_fact_stock"
-          description: "Stock estimation fact table"
-          depends_on:
-            - task_key: "gold_fact_sell_in"
-          notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/gold/facts/gold_fact_stock"
-            source: "WORKSPACE"
-          timeout_seconds: 1800
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # PHASE 3: KPIs (After facts)
-        # ─────────────────────────────────────────────────────────────────────
-        - task_key: "gold_kpi_market_visibility"
-          description: "Daily market visibility KPIs"
-          depends_on:
-            - task_key: "gold_fact_sell_in"
-            - task_key: "gold_fact_price_audit"
-            - task_key: "gold_fact_stock"
-          notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/gold/kpis/gold_kpi_market_visibility"
-            source: "WORKSPACE"
-          timeout_seconds: 2400
-          
-        - task_key: "gold_kpi_market_share"
-          description: "Market share analysis KPIs"
-          depends_on:
-            - task_key: "gold_kpi_market_visibility"
-          notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/gold/kpis/gold_kpi_market_share"
-            source: "WORKSPACE"
-          timeout_seconds: 1800
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # PHASE 4: VALIDATION
-        # ─────────────────────────────────────────────────────────────────────
-        - task_key: "gold_validation"
-          description: "Data quality validation using Delta metadata"
-          depends_on:
-            - task_key: "gold_kpi_market_share"
-          notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/gold/validation/gold_validation"
-            source: "WORKSPACE"
-          timeout_seconds: 600
+            base_parameters:
+              run_pipeline: "yes"
+              stop_on_error: "yes"
+              run_validation: "yes"
+              timeout_seconds: "6000"
+          timeout_seconds: 7200

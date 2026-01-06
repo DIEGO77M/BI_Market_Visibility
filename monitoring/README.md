@@ -1,91 +1,179 @@
 # 🔍 Monitoring - Schema & Quality Drift Detection
 
-**Purpose:** Operational monitoring for schema evolution across Bronze, Silver, and Gold layers of the Medallion Architecture.
+This directory contains **operational monitoring** scripts for detecting schema changes and data quality drift across the Medallion Architecture layers. The monitoring is **completely decoupled** from the data pipeline—pipelines never fail due to monitoring issues.
 
 ---
 
+## Why Monitoring Exists
 
-## 📁 Structure
+### Business Problem
+
+In enterprise data pipelines, source systems change without notice:
+- Upstream teams add/remove columns
+- Data types change silently
+- Data quality degrades over time
+- Volume patterns shift unexpectedly
+
+**Without monitoring:** These changes propagate downstream, breaking dashboards and KPIs silently.
+
+**With monitoring:** Proactive detection allows intervention before business impact.
+
+---
+
+## Architecture: Zero-Coupling Design
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         ZERO-COUPLING PRINCIPLE                                  │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│   DATA PIPELINE (notebooks/)              MONITORING (monitoring/)              │
+│   ┌──────────────────────────┐           ┌──────────────────────────┐          │
+│   │                          │           │                          │          │
+│   │  Bronze → Silver → Gold  │           │  Drift Detection         │          │
+│   │                          │           │                          │          │
+│   │  Writes to Delta Lake    │           │  Reads Delta History     │          │
+│   │  (normal operation)      │           │  (metadata only)         │          │
+│   │                          │           │                          │          │
+│   └────────────┬─────────────┘           └────────────┬─────────────┘          │
+│                │                                      │                         │
+│                ▼                                      ▼                         │
+│   ┌──────────────────────────────────────────────────────────────────┐         │
+│   │                      DELTA LAKE STORAGE                          │         │
+│   │                                                                  │         │
+│   │  _delta_log/           ◄─────────────── Monitoring reads here   │         │
+│   │  • Transaction history                  (zero-compute)          │         │
+│   │  • Schema metadata                                               │         │
+│   │  • Version snapshots                                             │         │
+│   └──────────────────────────────────────────────────────────────────┘         │
+│                                                                                  │
+│   KEY BENEFITS:                                                                 │
+│   ✅ Pipeline never fails due to monitoring issues                             │
+│   ✅ Monitoring reads metadata only (free)                                     │
+│   ✅ Single source of truth (Delta History)                                    │
+│   ✅ No custom logging required in pipelines                                   │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Why Not Embed Monitoring in Pipelines?
+
+| Approach | Pros | Cons | Decision |
+|----------|------|------|----------|
+| Monitoring inside notebooks | Single execution | Pipeline fails if monitoring fails, tight coupling | ❌ Rejected |
+| **Separate monitoring scripts** | Decoupled, independent failure | Separate scheduling needed | ✅ Selected |
+
+**Trade-off:** Requires separate scheduling but ensures pipeline resilience.
+
+---
+
+## Directory Structure
 
 ```
 monitoring/
 ├── drift_monitoring_bronze.py    # Bronze layer schema drift detection
-├── silver_drift_monitoring.py    # Silver layer drift monitoring (schema, quality, volume)
-├── gold_drift_monitoring.py      # Gold layer quality & drift monitoring
+├── silver_drift_monitoring.py    # Silver layer quality + volume drift
 └── README.md                     # This file
 ```
 
-**Notebooks:**
-- [../notebooks/silver_drift_monitoring.ipynb](../notebooks/silver_drift_monitoring.ipynb) (Databricks-ready, executable)
+### Why No Gold Drift Monitoring?
+
+**Gold layer validation is implemented differently:**
+
+| Layer | Monitoring Approach | Location |
+|-------|---------------------|----------|
+| Bronze | Schema drift detection | `monitoring/drift_monitoring_bronze.py` |
+| Silver | Quality + volume drift | `monitoring/silver_drift_monitoring.py` |
+| Gold | **Post-execution validation** | `notebooks/gold/validation/gold_validation.py` |
+
+**Rationale for Gold:**
+- Gold layer has strict contracts (Star Schema)
+- Validation is part of the pipeline (not separate monitoring)
+- Referential integrity checks run after each Gold execution
+- Failures should block downstream (intentional tight coupling for quality)
 
 ---
 
-## 🎯 What is Schema Drift Monitoring?
+## Bronze Layer Monitoring
 
-Schema drift occurs when the structure of source data changes unexpectedly:
-- ✅ New columns added (e.g., `"Promotion_Flag"` appears in Price_Audit)
-- ✅ Columns removed (e.g., `"Auditor_Notes"` no longer in source)
-- ✅ Columns renamed (e.g., `"Observed_Price"` → `"Current_Price"`)
+### File: `drift_monitoring_bronze.py`
 
-**This monitoring detects these changes proactively without blocking data ingestion.**
+**Purpose:** Detect schema changes in source data before they propagate downstream.
 
----
+**Schedule:** Daily at 3:05 AM (5 minutes after Bronze ingestion)
 
-## 🏗️ Architecture
-
-### Zero-Coupling Design (Opción A)
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      DATA PIPELINE (notebooks/)                 │
-│                                                                 │
-│  Bronze Ingestion → Silver Standardization → Gold Analytics    │
-│         ↓                    ↓                      ↓           │
-│    Writes Delta         Writes Delta          Writes Delta     │
-│         ↓                    ↓                      ↓           │
-└─────────┬───────────────────────────────────────────────────────┘
-          │
-          │ Delta History (_delta_log/) automatically tracks schemas
-          ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                    DELTA LAKE (Storage)                         │
-│  - Transaction logs with schema metadata (automatic)            │
-│  - DESCRIBE HISTORY provides version history                   │
-│  - No custom audit tables needed                               │
-└─────────┬───────────────────────────────────────────────────────┘
-          │
-          │ Reads Delta History (zero-compute, read-only)
-          ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                  MONITORING (monitoring/)                       │
-│                                                                 │
-│  Drift Detection → Compare Delta Versions → Generate Alerts    │
-│        ↓                                                        │
-│   Delta Tables (bronze_schema_alerts, silver_drift_history)    │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Key Principle:** 
-- ✅ **Zero Coupling:** Pipelines don't know monitoring exists
-- ✅ **Single Source of Truth:** Delta History is authoritative
-- ✅ **No Custom Logging:** Delta automatically tracks schema changes
-
----
-
-
-## 📊 Silver Layer Monitoring
-
-### Script: `silver_drift_monitoring.py`
-
-**Schedule:** After each Silver write (post-write hook, see Silver notebook)
-**Runtime:** ~1 minute (metadata-only, serverless-friendly)
-**Cluster:** Serverless (same as Silver pipeline)
+**Runtime:** ~2-5 minutes (metadata operations only)
 
 ### What It Monitors
 
-| Table | Drift Types | Alert Behavior |
-|-------|------------|----------------|
-| All Silver tables | Schema drift (new/missing/type changes), Quality drift (null/invalid rates), Volume drift (row count, key cardinality) | Alert on HIGH/MEDIUM/LOW severity, log in audit table |
+| Table | Critical Columns | Alert Behavior |
+|-------|------------------|----------------|
+| `bronze_price_audit` | PDV_Code, Product_SKU, Audit_Date, Observed_Price | Alert on new OR removed columns |
+| `bronze_sell_in` | Year, Product, PDV, Quantity, Amount | Alert on new OR removed columns |
+| `bronze_master_pdv` | PDV_Code, PDV_Name | Alert on new columns only (dimension can evolve) |
+| `bronze_master_products` | Product_SKU, Product_Name | Alert on new columns only |
+
+### Detection Logic
+
+```python
+# Compare current schema vs previous version
+current_columns = set(spark.table(table).columns)
+previous_columns = get_previous_schema_from_delta_history(table)
+
+new_columns = current_columns - previous_columns
+removed_columns = previous_columns - current_columns
+
+# Classify severity
+if removed_columns & critical_columns:
+    severity = "HIGH"
+elif removed_columns:
+    severity = "MEDIUM"
+else:
+    severity = "LOW"
+```
+
+### Severity Classification
+
+| Severity | Condition | Action Required |
+|----------|-----------|-----------------|
+| **HIGH** 🚨 | Critical column removed | URGENT: Verify source change, update Silver validation, notify consumers |
+| **MEDIUM** ⚠️ | Non-critical column removed | WARNING: Check Silver dependencies, verify intentional change |
+| **LOW** ℹ️ | New columns added | INFO: Document in data dictionary, consider Silver extension |
+
+### Output Table
+
+```sql
+-- Check recent alerts
+SELECT 
+    table_name,
+    severity,
+    new_columns,
+    removed_columns,
+    detected_timestamp
+FROM workspace.default.bronze_schema_alerts
+WHERE detected_timestamp >= current_date() - INTERVAL 7 DAYS
+ORDER BY severity DESC, detected_timestamp DESC;
+```
+
+---
+
+## Silver Layer Monitoring
+
+### File: `silver_drift_monitoring.py`
+
+**Purpose:** Detect quality degradation and volume anomalies in cleaned data.
+
+**Schedule:** After each Silver write (post-write hook)
+
+**Runtime:** ~1 minute (metadata-only, serverless-friendly)
+
+### What It Monitors
+
+| Drift Type | Detection Method | Example Alert |
+|------------|------------------|---------------|
+| **Schema Drift** | Column comparison vs baseline | "New column `promotion_flag` detected" |
+| **Quality Drift** | Null rate / invalid rate changes | "Null rate increased from 2% to 15%" |
+| **Volume Drift** | Row count vs historical average | "Row count dropped 60% vs 7-day average" |
 
 ### Severity Classification
 
@@ -97,100 +185,132 @@ Schema drift occurs when the structure of source data changes unexpectedly:
 
 ### Output Table
 
-**`silver_drift_history`** - Drift events with severity and details
 ```sql
+-- Check drift history
 SELECT * FROM workspace.default.silver_drift_history
-ORDER BY timestamp DESC;
+ORDER BY timestamp DESC
+LIMIT 50;
 ```
 
 ---
 
-## 📊 Bronze Layer Monitoring
+## How to Run
 
-### Notebook: `drift_monitoring_bronze.py`
+### Manual Execution (Interactive)
 
-**Schedule:** Daily at 3:05 AM (5 minutes after Bronze ingestion)  
-**Runtime:** ~2-5 minutes (metadata operations only)  
-**Cluster:** Serverless (same as Bronze ingestion)
-
-### What It Monitors
-
-| Table | Critical Columns | Alert Behavior |
-|-------|------------------|----------------|
-| `bronze_price_audit` | PDV_Code, Product_SKU, Audit_Date, Observed_Price | Alert on new OR removed columns |
-| `bronze_sell_in` | Year, Product, PDV, Quantity, Amount | Alert on new OR removed columns |
-| `bronze_master_pdv` | PDV_Code, PDV_Name | Alert on new columns only (dimension can evolve) |
-| `bronze_master_products` | Product_SKU, Product_Name | Alert on new columns only |
-
-### Severity Classification
-
-| Severity | Condition | Action Required |
-|----------|-----------|-----------------|
-| **HIGH** 🚨 | Critical column removed | URGENT: Verify source change, update Silver validation, notify consumers |
-| **MEDIUM** ⚠️ | Non-critical column removed | WARNING: Check Silver dependencies, verify intentional change |
-| **LOW** ℹ️ | New columns added | INFO: Document in data dictionary, consider Silver extension |
-
-### Output Tables
-
-**`bronze_schema_alerts`** - Drift alerts with severity (only table created by monitoring)
-```sql
-SELECT * FROM workspace.default.bronze_schema_alerts
-WHERE layer = 'bronze' AND severity IN ('HIGH', 'MEDIUM')
-ORDER BY detected_timestamp DESC;
+```python
+# In Databricks workspace:
+# 1. Navigate to monitoring/drift_monitoring_bronze.py
+# 2. Click "Run All"
+# 3. Review console output for detected drifts
 ```
 
----
+### Scheduled Execution (Production)
 
-## 🚀 How to Use
-
-### Run Manually (Interactive)
-
-1. Open Databricks workspace
-2. Navigate to `/monitoring/drift_monitoring_bronze.py`
-3. Click "Run All"
-4. Review console output for detected drifts
-
-### Run as Scheduled Job
-
-**Databricks Workflow Configuration:**
+Add to Databricks Workflow:
 
 ```yaml
-Job Name: Bronze_Pipeline_Daily
-
-Tasks:
-  1. bronze_ingestion
-     Notebook: notebooks/01_bronze_ingestion.py
-     Schedule: 3:00 AM daily
-     
-  2. drift_monitoring_bronze
-     Notebook: monitoring/drift_monitoring_bronze.py
-     Schedule: Depends on task 1 SUCCESS
-     Timeout: 10 minutes
-```
-
-**Deploy via Databricks CLI:**
-```bash
-databricks jobs create --json-file .databricks/workflows/bronze_pipeline.json
+# .databricks/workflows/monitoring_pipeline.yml
+resources:
+  jobs:
+    monitoring_daily:
+      name: "Schema & Quality Monitoring"
+      schedule:
+        quartz_cron_expression: "0 5 3 * * ?"  # 3:05 AM daily
+        timezone_id: "America/Bogota"
+      
+      tasks:
+        - task_key: "bronze_drift"
+          notebook_task:
+            notebook_path: "monitoring/drift_monitoring_bronze.py"
+        
+        - task_key: "silver_drift"
+          notebook_task:
+            notebook_path: "monitoring/silver_drift_monitoring.py"
+          depends_on:
+            - task_key: "bronze_drift"
 ```
 
 ---
 
-## 📈 Operational Queries
+## Configuration
 
-### Check Recent Alerts
+### Adjust Critical Columns
 
-```sql
-SELECT 
-    table_name,
-    severity,
-    new_columns,
-    removed_columns,
-    detected_timestamp
-FROM workspace.default.bronze_schema_alerts
-WHERE detected_timestamp >= current_date() - INTERVAL 7 DAYS
-  AND layer = 'bronze'
-ORDER BY severity DESC, detected_timestamp DESC;
+Edit `drift_monitoring_bronze.py`:
+
+```python
+BRONZE_TABLES_CONFIG = {
+    "bronze_price_audit": {
+        "critical_columns": [
+            "PDV_Code", 
+            "Product_SKU", 
+            "Audit_Date", 
+            "Observed_Price",
+            # Add new critical columns here
+        ],
+        "alert_on_new": True,
+        "alert_on_removed": True
+    },
+    # ... other tables
+}
 ```
+
+### Adjust Thresholds
+
+Edit `silver_drift_monitoring.py`:
+
+```python
+DRIFT_THRESHOLDS = {
+    "null_rate_increase": 0.10,      # Alert if null rate increases by 10%
+    "volume_drop_pct": 0.50,         # Alert if volume drops by 50%
+    "volume_spike_pct": 2.00,        # Alert if volume increases by 200%
+}
+```
+
+---
+
+## Design Decisions
+
+### Why Delta History Over Custom Audit Tables?
+
+| Approach | Storage | Compute | Maintenance |
+|----------|---------|---------|-------------|
+| Custom audit tables | Additional storage | Write operations | Manual cleanup |
+| **Delta History** | Already exists | Zero (metadata read) | Automatic |
+
+**Decision:** Delta History provides schema snapshots automatically. No need to duplicate.
+
+### Why Zero-Compute Validation?
+
+Uses `DESCRIBE HISTORY` + time travel instead of full table scans:
+
+```python
+# Zero-compute approach
+history = spark.sql(f"DESCRIBE HISTORY {table}")
+schema_at_version = spark.read.option("versionAsOf", version).table(table).schema
+
+# Avoided: Full table scan
+# df = spark.table(table).count()  # ❌ Expensive
+```
+
+**Benefits:**
+- ✅ $0 compute cost (metadata-only)
+- ✅ Milliseconds execution
+- ✅ Serverless-friendly
+
+### Why Non-Blocking Architecture?
+
+Bronze philosophy: **"Load first, validate later"**
+
+- Data ingestion should never fail due to monitoring
+- Drift detection is observability, not validation
+- Monitoring failure doesn't stop pipeline
+- Clean separation of concerns
+
+---
+
+## Operational Queries
 
 ### Tables Needing Attention
 
@@ -200,7 +320,7 @@ SELECT
     COUNT(*) as unresolved_alerts,
     MAX(severity) as highest_severity
 FROM workspace.default.bronze_schema_alerts
-WHERE notified = false AND layer = 'bronze'
+WHERE notified = false
 GROUP BY table_name
 HAVING COUNT(*) > 0;
 ```
@@ -210,145 +330,19 @@ HAVING COUNT(*) > 0;
 ```sql
 SELECT 
     table_name,
-    DATE(snapshot_timestamp) as date,
-    column_count,
-    COUNT(*) as snapshots_per_day
-FROM workspace.default.bronze_schema_audit
-WHERE layer = 'bronze'
-GROUP BY table_name, DATE(snapshot_timestamp)
-ORDER BY date DESC;
+    DATE(detected_timestamp) as date,
+    severity,
+    new_columns,
+    removed_columns
+FROM workspace.default.bronze_schema_alerts
+ORDER BY detected_timestamp DESC;
 ```
 
 ---
 
-## 🔧 Configuration
+## Related Documentation
 
-### Adjust Lookback Period
-
-Edit `drift_monitoring_bronze.py`:
-```python
-LOOKBACK_HOURS = 24  # Change to 48, 72, etc.
-```
-
-### Modify Critical Columns
-
-Edit `BRONZE_TABLES_CONFIG` dictionary:
-```python
-"bronze_price_audit": {
-    "critical_columns": ["PDV_Code", "Product_SKU", "Audit_Date", "Observed_Price", "NEW_CRITICAL_COL"],
-    ...
-}
-```
-
-### Enable Notifications (Future)
-
-```python
-# In drift_monitoring_bronze.py, uncomment:
-if severity == "HIGH":
-    send_slack_alert(message)
-    send_email_alert(recipients)
-```
-
----
-
-## 🎯 Design Decisions
-
-### Why Separate from Data Pipeline?
-
-**Problem if monitoring was inside Bronze notebook:**
-- ❌ Schema issues could block data loading
-- ❌ Violates "load-first" Bronze philosophy
-- ❌ Increases ingestion latency
-
-**SolutiOption A (Zero-Coupling)?
-
-**Rejected Option B (Bronze logs snapshots):**
-- ❌ Adds code to Bronze that isn't core responsibility
-- ❌ Creates tight coupling between pipeline and monitoring
-- ❌ Duplicates data Delta already has
-- ❌ If Bronze logging fails, monitoring breaks
-
-**Option A Benefits:**
-- ✅ **Zero Coupling:** Bronze doesn't know monitoring exists
-- ✅ **Single Source of Truth:** Delta History is authoritative
-- ✅ **No Extra Code:** Bronze stays clean (ingestion only)
-- ✅ **Self-Contained:** Monitoring reads Delta metadata directly
-
-### Why Delta History Over Custom Tables?
-
-Delta History already provides:
-- Schema snapshots (via DESCRIBE TABLE + version)
-- Transaction metadata (timestamp, user, operation)
-- Zero-compute access (metadata-only)
-- Automatic retention (transaction log lifecycle)
-
-**No need for `bronze_schema_audit` table** - Delta does this natively!
-
-### Why Zero-Compute Validation?
-
-Uses `DESCRIBE HISTORY` + time travel instead of full table scans:
-- ✅ **Cost:** $0 (metadata-only operation)
-- ✅ **Speed:** Milliseconds vs seconds
-- ✅ **Serverless-friendly:** No data scanning
-
-### Why Non-Blocking Architecture?
-
-Bronze philosophy: **"Load first, validate later"**
-- Data ingestion should never fail due to monitoring
-- Drift detection is observability, not validation
-- Monitoring failure doesn't stop pipeline
-- Clean separation of concernsft_monitoring_bronze_guide.md)
-- [Bronze Ingestion Notebook](../notebooks/01_bronze_ingestion.py)
-
----
-
-## 🔮 Future Enhancements
-
-
-### Phase 2: Silver & Gold Monitoring
-
-```
-monitoring/
-├── drift_monitoring_bronze.py    ✅ Implemented
-├── silver_drift_monitoring.py    ✅ Implemented
-└── drift_monitoring_gold.py      🔜 Planned
-```
-
-### Phase 3: Notification Integration
-
-- Slack webhooks for HIGH severity
-- Email alerts for critical column removal
-- PagerDuty integration for production incidents
-
-### Phase 4: Dashboard
-
-Power BI/SQL dashboard showing:
-- Drift frequency trends
-- Tables by stability score
-- Alert resolution time metrics
-- Schema evolution heatmap
-
----
-
-## 🤝 Contributing
-
-**Adding New Tables to Monitor:**
-
-1. Edit `BRONZE_TABLES_CONFIG` in `drift_monitoring_bronze.py`
-2. Define critical columns
-3. Set alert preferences
-4. Test with manual run
-
-
-**Adding New Monitoring Layers:**
-
-1. Copy `drift_monitoring_bronze.py` → `silver_drift_monitoring.py` (ya implementado)
-2. Actualiza referencias de tablas y lógica de drift según la capa
-3. Ajusta reglas de severidad y métricas de calidad
-4. Añade llamada post-write en el notebook correspondiente
-
----
-
-**Author:** Diego Mayorga | diego.mayorgacapera@gmail.com  
-**Last Updated:** 2025-12-31  
-**Repository:** [github.com/DIEGO77M/BI_Market_Visibility](https://github.com/DIEGO77M/BI_Market_Visibility)
+- [BRONZE_ARCHITECTURE_DECISIONS.md](../docs/BRONZE_ARCHITECTURE_DECISIONS.md) - Bronze layer design
+- [SILVER_ARCHITECTURE_DECISIONS.md](../docs/SILVER_ARCHITECTURE_DECISIONS.md) - Silver layer design
+- [GOLD_ARCHITECTURE_DECISIONS.md](../docs/GOLD_ARCHITECTURE_DECISIONS.md) - Gold validation approach
+- [notebooks/gold/validation/gold_validation.py](../notebooks/gold/validation/gold_validation.py) - Gold layer validation
