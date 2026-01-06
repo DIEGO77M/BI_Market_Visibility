@@ -55,25 +55,46 @@ Sell-In         →     Sell-In Validated →      gold_fact_sell_in
 
 ```
 BI_Market_Visibility/
-├── notebooks/                 # Databricks notebooks (Bronze→Silver→Gold)
-│   ├── 01_bronze_ingestion.py
-│   ├── 02_silver_standardization.py
-│   └── 03_gold_analytics.py
+├── .databricks/
+│   └── workflows/
+│       └── gold_pipeline.yml        # ⭐ Databricks Workflow (Production)
+├── notebooks/                 
+│   ├── bronze/
+│   │   └── 01_bronze_ingestion.py
+│   ├── silver/
+│   │   └── 02_silver_standardization.py
+│   └── gold/                        # ✨ Modular Gold Layer
+│       ├── 03_gold_orchestrator.py  # Configuration & pipeline execution
+│       ├── dimensions/
+│       │   ├── gold_dim_date.py     # Static calendar dimension
+│       │   ├── gold_dim_product.py  # SCD Type 2
+│       │   └── gold_dim_pdv.py      # SCD Type 2
+│       ├── facts/
+│       │   ├── gold_fact_sell_in.py      # Append-only, partitioned
+│       │   ├── gold_fact_price_audit.py  # Price visibility
+│       │   └── gold_fact_stock.py        # Estimated stock
+│       ├── kpis/
+│       │   ├── gold_kpi_market_visibility.py  # Daily operations
+│       │   └── gold_kpi_market_share.py       # Monthly trends
+│       └── validation/
+│           └── gold_validation.py   # Read-only post-checks
 ├── src/
-│   ├── utils/                 # Reusable Python modules
+│   ├── utils/                 
 │   │   ├── data_quality.py
-│   │   ├── spark_helpers.py
-│   │   └── gold_layer_utils.py
-│   └── tests/                 # pytest unit tests
-│       └── test_gold_layer.py
-├── docs/                      # Architecture Decision Records (ADRs)
+│   │   └── spark_helpers.py
+│   └── tests/                 
+│       └── test_data_quality.py
+├── monitoring/
+│   ├── drift_monitoring_bronze.py
+│   └── silver_drift_monitoring.py
+├── docs/                      
 │   ├── BRONZE_ARCHITECTURE_DECISIONS.md
 │   ├── SILVER_ARCHITECTURE_DECISIONS.md
-│   ├── GOLD_ARCHITECTURE_DESIGN.md
+│   ├── GOLD_ARCHITECTURE_DECISIONS.md  # ✨ NEW: 13 ADRs
 │   ├── POWERBI_INTEGRATION_GUIDE.md
 │   └── data_dictionary.md
-├── dashboards/                # Power BI files & screenshots
-├── data/                      # Local samples (production in Unity Catalog)
+├── dashboards/                
+├── data/                      
 ├── requirements.txt
 ├── databricks.yml
 └── LICENSE
@@ -90,25 +111,53 @@ pyspark >= 3.5
 
 ### Execution in Databricks
 
-1. **Setup:**
-   ```bash
-   git clone https://github.com/DIEGO77M/BI_Market_Visibility.git
-   pip install -r requirements.txt
-   ```
+#### Option A: Orchestrator (Development/Demo)
+```python
+# In Databricks notebook 03_gold_orchestrator.py:
+# 1. Set widget "Execute Pipeline" = "yes"
+# 2. Run All Cells
+# OR
+# Set RUN_PIPELINE = True and run
+```
 
-2. **Run Notebooks (in order):**
-   ```
-   01_bronze_ingestion.py       # ~2-4 min
-   02_silver_standardization.py # ~3 min
-   03_gold_analytics.py         # ~5 min ✨ NEW
-   ```
+#### Option B: Databricks Workflows (Production)
+```bash
+# Deploy the workflow
+databricks bundle deploy --target prod
 
-3. **Validate:**
-   ```bash
-   pytest src/tests/test_gold_layer.py -v
-   ```
+# Run manually
+databricks jobs run-now --job-id <gold_layer_pipeline_job_id>
 
-4. **Connect Power BI** → [Integration Guide](docs/POWERBI_INTEGRATION_GUIDE.md)
+# Workflow definition: .databricks/workflows/gold_pipeline.yml
+```
+
+#### Option C: Manual Execution (Individual Notebooks)
+```
+# Phase 1: Ingestion
+notebooks/bronze/01_bronze_ingestion.py          # ~2-4 min
+
+# Phase 2: Standardization
+notebooks/silver/02_silver_standardization.py    # ~3 min
+
+# Phase 3: Gold Layer (Order matters for dependencies)
+notebooks/gold/dimensions/gold_dim_date.py       # ~30 sec
+notebooks/gold/dimensions/gold_dim_product.py    # ~30 sec
+notebooks/gold/dimensions/gold_dim_pdv.py        # ~30 sec
+notebooks/gold/facts/gold_fact_sell_in.py        # ~1 min
+notebooks/gold/facts/gold_fact_price_audit.py    # ~1 min
+notebooks/gold/facts/gold_fact_stock.py          # ~1 min
+notebooks/gold/kpis/gold_kpi_market_visibility.py # ~2 min
+notebooks/gold/kpis/gold_kpi_market_share.py     # ~1 min
+notebooks/gold/validation/gold_validation.py     # ~30 sec (read-only)
+```
+
+### Validate
+```bash
+pytest src/tests/test_gold_layer.py -v
+```
+
+### Connect Power BI
+→ [Integration Guide](docs/POWERBI_INTEGRATION_GUIDE.md)
 
 ## 📚 Documentation
 
@@ -116,7 +165,7 @@ pyspark >= 3.5
 |----------|---------|
 | [BRONZE_ARCHITECTURE_DECISIONS.md](docs/BRONZE_ARCHITECTURE_DECISIONS.md) | Bronze layer ADRs (5 decisions) |
 | [SILVER_ARCHITECTURE_DECISIONS.md](docs/SILVER_ARCHITECTURE_DECISIONS.md) | Silver layer ADRs (9 decisions) |
-| [GOLD_ARCHITECTURE_DESIGN.md](docs/GOLD_ARCHITECTURE_DESIGN.md) | Gold layer design + ADRs (9 decisions) |
+| [GOLD_ARCHITECTURE_DECISIONS.md](docs/GOLD_ARCHITECTURE_DECISIONS.md) | Gold layer ADRs (14 decisions) |
 | [POWERBI_INTEGRATION_GUIDE.md](docs/POWERBI_INTEGRATION_GUIDE.md) | BI connection setup + DAX measures |
 | [data_dictionary.md](docs/data_dictionary.md) | Schema definitions for all 16 tables |
 
@@ -127,14 +176,30 @@ pytest src/tests/ -v              # All tests
 pytest src/tests/test_gold_layer.py -v  # Gold layer only (40+ assertions)
 ```
 
-## ✨ Gold Layer Features
+## ✨ Gold Layer Features (Anti-Saturation Architecture)
 
-✅ **Surrogate Keys** - Deterministic hash-based generation  
-✅ **SCD Type 2** - Historical change tracking (valid_from/valid_to)  
-✅ **Dynamic Partition Overwrite** - Incremental refresh optimization  
-✅ **Data Quality** - 8 validation types (uniqueness, referential integrity, consistency)  
-✅ **Pre-Aggregated KPIs** - Ready for instant Power BI queries  
-✅ **Serverless Optimized** - No cache/persist, zero-compute metrics  
+✅ **Decoupled Jobs** - Each table = independent notebook (no cascading failures)  
+✅ **Surrogate Keys** - Deterministic SHA-256 hash generation  
+✅ **SCD Type 2** - Full historical tracking (Product, PDV dimensions)  
+✅ **Dynamic Partition Overwrite** - Incremental refresh by date  
+✅ **Pre-Aggregated KPIs** - Zero DAX complexity in Power BI  
+✅ **Databricks Workflows** - Production-ready parallel DAG execution  
+✅ **Zero-Compute Validation** - Delta History metadata checks  
+✅ **Serverless Optimized** - No cache/persist, single write per job  
+✅ **Stock Estimation** - Derived from sell-in patterns (documented assumptions)  
+
+### Gold Layer Tables (8 Total)
+
+| Table | Type | Grain | Purpose |
+|-------|------|-------|---------|
+| `gold_dim_date` | Dimension | date | Calendar attributes |
+| `gold_dim_product` | Dimension (SCD2) | product × version | Product hierarchy |
+| `gold_dim_pdv` | Dimension (SCD2) | pdv × version | Store attributes |
+| `gold_fact_sell_in` | Fact | date × product × pdv | Commercial push |
+| `gold_fact_price_audit` | Fact | date × product × pdv | Price visibility |
+| `gold_fact_stock` | Fact | date × product × pdv | Inventory risk |
+| `gold_kpi_market_visibility_daily` | KPI | date × product × channel | Daily operations |
+| `gold_kpi_market_share` | KPI | month × brand × channel | Trend analysis |
 
 ## 📊 Key Metrics Available
 

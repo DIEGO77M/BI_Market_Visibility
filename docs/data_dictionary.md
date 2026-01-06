@@ -215,65 +215,355 @@ This document provides detailed information about all data entities, attributes,
 
 ## Gold Layer Tables
 
-### fact_[table_name]
+### Dimensions
+
+#### gold_dim_date
 
 | Column Name | Data Type | Description | Business Logic | Nullable | Example |
 |-------------|-----------|-------------|----------------|----------|---------|
-| fact_key | bigint | Surrogate key | Auto-generated | No | 123456789 |
-| dim_key_1 | integer | Foreign key to dimension | Lookup | No | 101 |
-| measure_1 | decimal(18,2) | [Description] | [Calculation] | Yes | 1234.56 |
-| created_date | date | Record creation date | System | No | 2024-01-15 |
+| date_sk | integer | Surrogate key (YYYYMMDD) | date_format("yyyyMMdd") | No | 20260106 |
+| date | date | Calendar date | Source | No | 2026-01-06 |
+| year | integer | Calendar year | year(date) | No | 2026 |
+| quarter | integer | Quarter (1-4) | quarter(date) | No | 1 |
+| month | integer | Month (1-12) | month(date) | No | 1 |
+| week | integer | ISO week of year | weekofyear(date) | No | 2 |
+| day_of_month | integer | Day of month (1-31) | dayofmonth(date) | No | 6 |
+| day_of_week | integer | Day of week (1=Sun, 7=Sat) | dayofweek(date) | No | 3 |
+| year_month | string | Year-Month | YYYY-MM format | No | 2026-01 |
+| year_quarter | string | Year-Quarter | YYYY-Qn format | No | 2026-Q1 |
+| month_name | string | Full month name | MMMM format | No | January |
+| month_name_short | string | Abbreviated month | MMM format | No | Jan |
+| day_name | string | Full day name | EEEE format | No | Tuesday |
+| day_name_short | string | Abbreviated day | EEE format | No | Tue |
+| is_weekend | boolean | Weekend flag | Sat or Sun | No | false |
+| is_month_end | boolean | Last day of month | date = last_day(date) | No | false |
+| is_month_start | boolean | First day of month | day_of_month = 1 | No | false |
+| fiscal_year | integer | Fiscal year | = calendar year | No | 2026 |
+| fiscal_quarter | integer | Fiscal quarter | = calendar quarter | No | 1 |
 
-**Table Purpose:** [Describe the purpose and use case]
+**Table Purpose:** Calendar dimension for time-based analysis and reporting
 
-**Grain:** [Describe the grain/level of detail]
+**Dimension Type:** Static (Type 1 - regenerated annually)
 
-**Business Logic:**
-- Logic 1: [Description]
-- Logic 2: [Description]
+**Date Range:** 2022-01-01 to 2026-12-31
 
-**Relationships:**
-- Related to: `dim_[dimension_name]` via `dim_key_1`
+**Refresh Frequency:** Annual or when extending date range
 
 ---
 
-### dim_[dimension_name]
+#### gold_dim_product
 
 | Column Name | Data Type | Description | Business Logic | Nullable | Example |
 |-------------|-----------|-------------|----------------|----------|---------|
-| dim_key | integer | Primary key | Auto-generated | No | 101 |
-| attribute_1 | string | [Description] | [Business logic] | No | [Sample value] |
-| attribute_2 | string | [Description] | [Business logic] | Yes | [Sample value] |
-| is_active | boolean | Active flag | SCD Type 2 | No | true |
-| effective_date | date | Start date of validity | SCD Type 2 | No | 2024-01-01 |
-| end_date | date | End date of validity | SCD Type 2 | Yes | 2024-12-31 |
+| product_sk | string(16) | Surrogate key | SHA-256 hash | No | a1b2c3d4e5f67890 |
+| product_code | string | Business key | From Silver | No | PROD001 |
+| product_name | string | Product description | From Silver | No | COFFEE 500G |
+| brand | string | Brand name | Tracked attribute | No | NESCAFE |
+| segment | string | Product segment | Tracked attribute | No | BEVERAGES |
+| category | string | Product category | Tracked attribute | No | HOT DRINKS |
+| valid_from | date | Version start date | SCD2 logic | No | 2026-01-06 |
+| valid_to | date | Version end date | 9999-12-31 for current | No | 9999-12-31 |
+| is_current | boolean | Active version flag | SCD2 logic | No | true |
 
-**Table Purpose:** [Describe the purpose and use case]
+**Table Purpose:** Product master dimension with full change history
 
-**Dimension Type:** Type 1 / Type 2 / Type 3
+**Dimension Type:** SCD Type 2 (Slowly Changing)
 
-**Hierarchies:**
-- Hierarchy 1: Level 1 → Level 2 → Level 3
+**Tracked Attributes:** product_name, brand, segment, category
+
+**Query Patterns:**
+- Current: `WHERE is_current = true`
+- Point-in-time: `WHERE date BETWEEN valid_from AND valid_to`
+
+---
+
+#### gold_dim_pdv
+
+| Column Name | Data Type | Description | Business Logic | Nullable | Example |
+|-------------|-----------|-------------|----------------|----------|---------|
+| pdv_sk | string(16) | Surrogate key | SHA-256 hash | No | f6e5d4c3b2a19087 |
+| pdv_code | string | Business key | code_eleader from Silver | No | PDV001 |
+| pdv_name | string | Store name | Tracked attribute | No | SUPER MART |
+| channel | string | Sales channel | Tracked attribute | No | MODERN TRADE |
+| region | string | Geographic region | Tracked attribute | No | NORTH |
+| city | string | City | Tracked attribute | No | KINGSTON |
+| format | string | Store format | Tracked attribute | No | SUPERMARKET |
+| latitude | double | Geographic latitude | Informational | Yes | 18.0179 |
+| longitude | double | Geographic longitude | Informational | Yes | -76.8099 |
+| valid_from | date | Version start date | SCD2 logic | No | 2026-01-06 |
+| valid_to | date | Version end date | 9999-12-31 for current | No | 9999-12-31 |
+| is_current | boolean | Active version flag | SCD2 logic | No | true |
+
+**Table Purpose:** Point of Sale (store) dimension with change history
+
+**Dimension Type:** SCD Type 2 (Slowly Changing)
+
+**Tracked Attributes:** pdv_name, channel, region, city, format
+
+---
+
+### Fact Tables
+
+#### gold_fact_sell_in
+
+| Column Name | Data Type | Description | Business Logic | Nullable | Example |
+|-------------|-----------|-------------|----------------|----------|---------|
+| date_sk | integer | FK to dim_date (partition) | Lookup | No | 20260106 |
+| product_sk | string | FK to dim_product | Lookup (is_current=true) | Yes | a1b2c3d4e5f67890 |
+| pdv_sk | string | FK to dim_pdv | Lookup (is_current=true) | Yes | f6e5d4c3b2a19087 |
+| transaction_date | date | Transaction date | From Silver | No | 2026-01-06 |
+| quantity_sell_in | integer | Units sold (aggregated) | SUM(quantity) at grain | No | 150 |
+| value_sell_in | double | Revenue (aggregated) | SUM(value) at grain | No | 1875.00 |
+| unit_price_sell_in | double | Average unit price | value / quantity | Yes | 12.50 |
+| transactions_count | integer | Number of transactions | COUNT at grain | No | 3 |
+| product_code | string | Natural key (degenerate) | For debugging | No | PROD001 |
+| pdv_code | string | Natural key (degenerate) | For debugging | No | PDV001 |
+| processing_timestamp | timestamp | ETL timestamp | System | No | 2026-01-06 08:00:00 |
+
+**Table Purpose:** Sell-in transactions (manufacturer → retailer)
+
+**Grain:** date × product × pdv
+
+**Partition:** date_sk
+
+**Business Use:** Measure commercial push, track sales volume
+
+---
+
+#### gold_fact_price_audit
+
+| Column Name | Data Type | Description | Business Logic | Nullable | Example |
+|-------------|-----------|-------------|----------------|----------|---------|
+| date_sk | integer | FK to dim_date (partition) | Lookup | No | 20260106 |
+| product_sk | string | FK to dim_product | Lookup | Yes | a1b2c3d4e5f67890 |
+| pdv_sk | string | FK to dim_pdv | Lookup | Yes | f6e5d4c3b2a19087 |
+| audit_date | date | Price observation date | From Silver | No | 2026-01-06 |
+| observed_price | double | Actual price at PDV | AVG if multiple per day | No | 14.99 |
+| avg_market_price | double | Market average (product/month) | AVG across all PDVs | No | 15.50 |
+| price_variance | double | Difference from market | observed - avg_market | No | -0.51 |
+| price_index | double | Price competitiveness | (observed/avg) × 100 | No | 96.71 |
+| is_above_market | boolean | Above market flag | observed > avg_market | No | false |
+| is_below_market | boolean | Below market flag | observed < avg_market | No | true |
+| market_observations | integer | Market sample size | COUNT for avg calculation | No | 45 |
+| product_code | string | Natural key | For debugging | No | PROD001 |
+| pdv_code | string | Natural key | For debugging | No | PDV001 |
+| year_month | string | Period for grouping | YYYY-MM format | No | 2026-01 |
+| processing_timestamp | timestamp | ETL timestamp | System | No | 2026-01-06 08:00:00 |
+
+**Table Purpose:** Price observations for market visibility
+
+**Grain:** audit_date × product × pdv
+
+**Partition:** date_sk
+
+**Price Index Interpretation:**
+- < 85: Significantly below market
+- 85-95: Below market (competitive)
+- 95-105: At market
+- 105-115: Above market (premium)
+- > 115: Significantly above market
+
+---
+
+#### gold_fact_stock (Estimated)
+
+| Column Name | Data Type | Description | Business Logic | Nullable | Example |
+|-------------|-----------|-------------|----------------|----------|---------|
+| date_sk | integer | FK to dim_date (partition) | Lookup | No | 20260106 |
+| product_sk | string | FK to dim_product | Lookup | Yes | a1b2c3d4e5f67890 |
+| pdv_sk | string | FK to dim_pdv | Lookup | Yes | f6e5d4c3b2a19087 |
+| stock_date | date | Stock position date | From fact_sell_in | No | 2026-01-06 |
+| opening_stock | integer | Estimated opening stock | Prior day closing | No | 120 |
+| closing_stock | integer | Estimated closing stock | cum_sell_in - cum_sell_out | No | 100 |
+| stock_days | double | Days of inventory | closing / avg_daily_demand | No | 8.5 |
+| stock_out_flag | boolean | Stock-out indicator | closing <= 0 OR stock_days <= 0 | No | false |
+| overstock_flag | boolean | Overstock indicator | stock_days > 45 | No | false |
+| is_healthy_stock | boolean | Healthy stock range | 0 < stock_days <= 45 | No | true |
+| cumulative_sell_in | integer | Cumulative sell-in | Running sum | No | 500 |
+| cumulative_sell_out_estimated | integer | Estimated cumulative sell-out | cum_sell_in × 0.85 | No | 425 |
+| avg_daily_sell_out_estimated | double | 30-day avg daily demand | Rolling avg | No | 11.76 |
+| daily_sell_in | integer | Daily sell-in quantity | From fact_sell_in | No | 25 |
+| product_code | string | Natural key | For debugging | No | PROD001 |
+| pdv_code | string | Natural key | For debugging | No | PDV001 |
+| estimation_method | string | Documents formula | Transparency | No | SELL_OUT_RATE=0.85 |
+| processing_timestamp | timestamp | ETL timestamp | System | No | 2026-01-06 08:00:00 |
+
+**Table Purpose:** Estimated stock position for risk management
+
+**Grain:** date × product × pdv
+
+**Partition:** date_sk
+
+**⚠️ Estimation Assumptions:**
+- Sell-out rate: 85% of sell-in
+- Stock-out threshold: 0 days
+- Overstock threshold: 45 days
+- Lookback period: 30 days
+
+---
+
+### KPI Tables (Denormalized)
+
+#### gold_kpi_market_visibility_daily
+
+| Column Name | Data Type | Description | Business Logic | Nullable | Example |
+|-------------|-----------|-------------|----------------|----------|---------|
+| date_sk | integer | Date key (partition) | Grain | No | 20260106 |
+| product_sk | string | Product key | Grain | Yes | a1b2c3d4e5f67890 |
+| channel | string | Sales channel | Grain | No | MODERN TRADE |
+| product_code | string | Product code | Denormalized | Yes | PROD001 |
+| product_name | string | Product name | Denormalized | Yes | COFFEE 500G |
+| brand | string | Brand | Denormalized | Yes | NESCAFE |
+| category | string | Category | Denormalized | Yes | HOT DRINKS |
+| date | date | Calendar date | Denormalized | No | 2026-01-06 |
+| year_month | string | Period | Denormalized | No | 2026-01 |
+| **Sell-In KPIs** |
+| total_sell_in_qty | integer | Total units sold | SUM(quantity_sell_in) | Yes | 1500 |
+| total_sell_in_value | double | Total revenue | SUM(value_sell_in) | Yes | 18750.00 |
+| avg_unit_price_sell_in | double | Avg unit price | AVG(unit_price) | Yes | 12.50 |
+| estimated_sell_out_qty | integer | Est. consumer sales | sell_in × 0.85 | Yes | 1275 |
+| sell_in_sell_out_ratio | double | Push/Pull balance | sell_in / sell_out | Yes | 1.18 |
+| pdv_count_with_sell_in | integer | Active stores | COUNT DISTINCT(pdv) | Yes | 35 |
+| **Price KPIs** |
+| avg_observed_price | double | Avg price observed | AVG(observed_price) | Yes | 14.99 |
+| market_avg_price | double | Market average | AVG(avg_market_price) | Yes | 15.50 |
+| price_competitiveness_index | double | Price index | AVG(price_index) | Yes | 96.71 |
+| min_price_index | double | Lowest price index | MIN(price_index) | Yes | 85.00 |
+| max_price_index | double | Highest price index | MAX(price_index) | Yes | 115.00 |
+| pdv_above_market | integer | Stores above market | COUNT(is_above_market) | Yes | 12 |
+| pdv_below_market | integer | Stores below market | COUNT(is_below_market) | Yes | 23 |
+| **Stock KPIs** |
+| total_closing_stock | integer | Total inventory | SUM(closing_stock) | Yes | 5000 |
+| avg_stock_days | double | Avg days of stock | AVG(stock_days) | Yes | 12.5 |
+| total_pdv_count | integer | Total stores | COUNT DISTINCT(pdv) | Yes | 50 |
+| pdv_with_stock_out | integer | Stores with stock-out | COUNT(stock_out_flag) | Yes | 5 |
+| pdv_with_overstock | integer | Stores with overstock | COUNT(overstock_flag) | Yes | 8 |
+| pdv_with_healthy_stock | integer | Stores healthy | COUNT(is_healthy_stock) | Yes | 37 |
+| availability_rate | double | % stores with stock | (total - stock_out) / total × 100 | Yes | 90.00 |
+| lost_sales_qty_estimated | double | Est. lost units | stock_out_pdvs × avg_demand | Yes | 125.5 |
+| lost_sales_value_estimated | double | Est. lost revenue | lost_qty × avg_price | Yes | 1880.75 |
+| **Composite KPIs** |
+| stock_health_score | double | Health score (0-100) | Weighted composite | Yes | 78.50 |
+| **Alert Flags** |
+| alert_stock_out | boolean | Stock-out alert | Any stock-out detected | No | true |
+| alert_price_anomaly | boolean | Price alert | Index < 85 OR > 115 | No | false |
+| alert_overstock | boolean | Overstock alert | > 30% stores overstocked | No | false |
+| alert_low_availability | boolean | Availability alert | Rate < 80% | No | false |
+| processing_timestamp | timestamp | ETL timestamp | System | No | 2026-01-06 08:00:00 |
+
+**Table Purpose:** Daily operational KPIs for market visibility dashboards
+
+**Grain:** date × product × channel
+
+**Partition:** date_sk
+
+**Designed For:** Power BI Direct Query, Streamlit dashboards, daily alerts
+
+---
+
+#### gold_kpi_market_share
+
+| Column Name | Data Type | Description | Business Logic | Nullable | Example |
+|-------------|-----------|-------------|----------------|----------|---------|
+| year_month | string | Period (partition) | Grain | No | 2026-01 |
+| brand | string | Product brand | Grain | No | NESCAFE |
+| category | string | Product category | Grain | No | HOT DRINKS |
+| channel | string | Sales channel | Grain | No | MODERN TRADE |
+| **Absolute Metrics** |
+| monthly_sell_in_qty | integer | Monthly units sold | SUM(total_sell_in_qty) | Yes | 45000 |
+| monthly_sell_in_value | double | Monthly revenue | SUM(total_sell_in_value) | Yes | 562500.00 |
+| monthly_sell_out_qty | integer | Est. monthly sell-out | SUM(estimated_sell_out_qty) | Yes | 38250 |
+| monthly_lost_sales | double | Est. monthly lost sales | SUM(lost_sales_value) | Yes | 15000.00 |
+| active_products | integer | Active product count | COUNT DISTINCT(product_sk) | Yes | 12 |
+| **Share Metrics (Portfolio)** |
+| portfolio_share_qty_pct | double | % of total portfolio units | (brand_qty / total_qty) × 100 | Yes | 25.50 |
+| portfolio_share_value_pct | double | % of total portfolio value | (brand_value / total_value) × 100 | Yes | 28.75 |
+| channel_share_of_brand_pct | double | % of brand in channel | (channel_qty / brand_qty) × 100 | Yes | 45.00 |
+| **Trend Metrics** |
+| share_change_qty_pp | double | MoM share change (pp) | current - previous month | Yes | +1.25 |
+| share_change_value_pp | double | MoM value share change | current - previous month | Yes | +1.50 |
+| sell_in_growth_pct | double | MoM sell-in growth % | ((current - prev) / prev) × 100 | Yes | +5.25 |
+| share_trend | string | Trend direction | GAINING/STABLE/LOSING | Yes | GAINING |
+| **Context Metrics** |
+| avg_price_index | double | Avg price competitiveness | AVG(price_competitiveness_index) | Yes | 98.50 |
+| avg_availability | double | Avg availability rate | AVG(availability_rate) | Yes | 92.00 |
+| total_market_qty | integer | Total market units | SUM all brands | Yes | 176470 |
+| total_market_value | double | Total market value | SUM all brands | Yes | 1960000.00 |
+| brand_total_qty | integer | Brand total units | SUM across channels | Yes | 45000 |
+| brand_total_value | double | Brand total value | SUM across channels | Yes | 562500.00 |
+| observation_count | integer | Data points | COUNT | Yes | 1500 |
+| processing_timestamp | timestamp | ETL timestamp | System | No | 2026-01-06 08:00:00 |
+
+**Table Purpose:** Monthly market share analysis and trend detection
+
+**Grain:** year_month × brand × category × channel
+
+**Partition:** year_month
+
+**⚠️ Important:** This is **portfolio share**, not true market share (requires competitor data)
+
+**Trend Interpretation:**
+- GAINING: share_change > +1pp
+- STABLE: -1pp to +1pp
+- LOSING: share_change < -1pp
 
 ---
 
 ## Key Performance Indicators (KPIs)
 
-### KPI 1: [KPI Name]
+### KPI 1: Availability Rate
 
-- **Definition:** [Clear definition]
-- **Formula:** `[Mathematical formula]`
-- **Target:** [Target value or threshold]
-- **Source Tables:** [List of tables used]
-- **Refresh Frequency:** Daily/Weekly/Monthly
+- **Definition:** Percentage of stores with product in stock
+- **Formula:** `(Total PDVs - PDVs with Stock-Out) / Total PDVs × 100`
+- **Target:** ≥ 95%
+- **Source Tables:** gold_fact_stock, gold_kpi_market_visibility_daily
+- **Refresh Frequency:** Daily
+- **Alert Threshold:** < 80%
 
-### KPI 2: [KPI Name]
+### KPI 2: Price Competitiveness Index
 
-- **Definition:** [Clear definition]
-- **Formula:** `[Mathematical formula]`
-- **Target:** [Target value or threshold]
-- **Source Tables:** [List of tables used]
-- **Refresh Frequency:** Daily/Weekly/Monthly
+- **Definition:** Product price relative to market average
+- **Formula:** `(Observed Price / Market Average Price) × 100`
+- **Target:** 95-105 (at market)
+- **Source Tables:** gold_fact_price_audit, gold_kpi_market_visibility_daily
+- **Refresh Frequency:** Daily
+- **Alert Threshold:** < 85 or > 115
+
+### KPI 3: Sell-In / Sell-Out Ratio
+
+- **Definition:** Balance between manufacturer push and consumer pull
+- **Formula:** `Sell-In Quantity / Estimated Sell-Out Quantity`
+- **Target:** 1.0 (balanced)
+- **Source Tables:** gold_fact_sell_in, gold_kpi_market_visibility_daily
+- **Refresh Frequency:** Daily
+- **Alert Threshold:** > 1.5 (overstock risk) or < 0.7 (stock-out risk)
+
+### KPI 4: Lost Sales Estimated
+
+- **Definition:** Revenue at risk due to stock-outs
+- **Formula:** `Stock-Out PDVs × Avg Daily Demand × Avg Unit Price`
+- **Target:** Minimize
+- **Source Tables:** gold_fact_stock, gold_kpi_market_visibility_daily
+- **Refresh Frequency:** Daily
+- **Alert Threshold:** > $10,000 daily
+
+### KPI 5: Stock Health Score
+
+- **Definition:** Composite inventory health score
+- **Formula:** `(Availability Rate × 0.4) + (Days-of-Stock Score × 0.3) + (No-Overstock Score × 0.3)`
+- **Target:** ≥ 80
+- **Source Tables:** gold_kpi_market_visibility_daily
+- **Refresh Frequency:** Daily
+- **Alert Threshold:** < 60
+
+### KPI 6: Portfolio Share (by Quantity)
+
+- **Definition:** Brand's share of total portfolio units sold
+- **Formula:** `(Brand Quantity / Total Portfolio Quantity) × 100`
+- **Target:** Varies by brand
+- **Source Tables:** gold_kpi_market_share
+- **Refresh Frequency:** Monthly
+- **Trend Alert:** Losing > 2pp MoM
 
 ---
 

@@ -1,19 +1,68 @@
-# This is a Databricks asset bundle definition for BI_Market_Visibility.
-# The Databricks extension requires databricks.yml configuration file.
-# See https://docs.databricks.com/dev-tools/bundles/index.html for documentation.
+# =============================================================================
+# DATABRICKS ASSET BUNDLE - BI Market Visibility
+# =============================================================================
+# Project: Market Visibility Analytics Platform
+# Author: Diego Mayorga
+# Last Updated: 2026-01-06
+# Architecture: Medallion (Bronze → Silver → Gold)
+# =============================================================================
 
 bundle:
   name: BI_Market_Visibility
 
+# =============================================================================
+# VARIABLES - Environment Configuration
+# =============================================================================
+variables:
+  catalog:
+    description: Unity Catalog name
+    default: workspace
+  schema:
+    description: Schema name for tables
+    default: default
+  notification_email:
+    description: Email for job notifications
+    default: diego.mayorgacapera@gmail.com
+
+# =============================================================================
+# WORKSPACE CONFIGURATION
+# =============================================================================
+workspace:
+  host: https://dbc-fd5c2cc6-9b83.cloud.databricks.com
+
+# =============================================================================
+# INCLUDE WORKFLOW DEFINITIONS
+# =============================================================================
+include:
+  - .databricks/workflows/*.yml
+
+# =============================================================================
+# TARGETS - Environment Definitions
+# =============================================================================
 targets:
   dev:
     mode: development
     default: true
     workspace:
       host: https://dbc-fd5c2cc6-9b83.cloud.databricks.com
+    variables:
+      catalog: workspace
+      schema: default
 
-  ## Optionally, there could be 'staging' or 'prod' targets here.
-  #
-  # prod:
-  #   workspace:
-  #     host: https://dbc-fd5c2cc6-9b83.cloud.databricks.com
+  staging:
+    mode: staging
+    workspace:
+      host: https://dbc-fd5c2cc6-9b83.cloud.databricks.com
+    variables:
+      catalog: workspace
+      schema: staging
+
+  prod:
+    mode: production
+    workspace:
+      host: https://dbc-fd5c2cc6-9b83.cloud.databricks.com
+    variables:
+      catalog: workspace
+      schema: production
+    run_as:
+      service_principal_name: ${DATABRICKS_SP_NAME}
