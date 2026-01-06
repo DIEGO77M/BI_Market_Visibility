@@ -136,6 +136,43 @@ def log_data_quality(df, table_name, price_cols=None, date_cols=None):
     if date_cols:
         print(f"   Invalid Dates: {invalid_dates:,} ({invalid_dates/total_records*100 if total_records else 0:.1f}%)")
 
+
+def clean_european_number_format(df, column_name):
+    """
+    Clean European number format (180.562.475) to standard double format.
+    
+    European format uses:
+    - Dots (.) as thousand separators  
+    - Comma (,) as decimal separator
+    
+    This function handles both cases:
+    - "180.562.475" (integer with thousand separators) -> 180562475.0
+    - "180.562,475" (decimal with thousand separators) -> 180562.475
+    
+    Args:
+        df: Input DataFrame
+        column_name: Column to clean
+        
+    Returns:
+        DataFrame with cleaned column as DoubleType
+    """
+    temp_col = f"{column_name}_cleaned"
+    
+    return df.withColumn(
+        temp_col,
+        # Step 1: Replace comma with placeholder (preserve decimal comma)
+        regexp_replace(
+            regexp_replace(
+                regexp_replace(
+                    col(column_name).cast("string"),
+                    ",", "##DECIMAL##"  # Preserve decimal comma
+                ),
+                "\\.", ""  # Remove all dots (thousand separators)
+            ),
+            "##DECIMAL##", "."  # Restore decimal as dot
+        ).cast("double")
+    ).drop(column_name).withColumnRenamed(temp_col, column_name)
+
 # COMMAND ----------
 
 # Unity Catalog Configuration
@@ -211,10 +248,11 @@ for column, dtype in df.dtypes:
 # Explicit type casting for critical columns
 if "code_eleader" in df.columns:
     df = df.withColumn("code_eleader", col("code_eleader").cast(StringType()))
+# Clean European number format for latitude/longitude (e.g., "180.562.475" -> 180562.475)
 if "latitude" in df.columns:
-    df = df.withColumn("latitude", col("latitude").cast(DoubleType()))
+    df = clean_european_number_format(df, "latitude")
 if "longitude" in df.columns:
-    df = df.withColumn("longitude", col("longitude").cast(DoubleType()))
+    df = clean_european_number_format(df, "longitude")
 # Filter: Remove records where PDV code is null (critical business field)
 if "code_eleader" in df.columns:
     df = df.filter(col("code_eleader").isNotNull())
