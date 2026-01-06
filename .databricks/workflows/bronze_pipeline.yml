@@ -1,10 +1,11 @@
 # =============================================================================
-# BRONZE LAYER PIPELINE - DATABRICKS WORKFLOW
+# BRONZE LAYER PIPELINE - DATABRICKS SERVERLESS WORKFLOW
 # =============================================================================
 # 
 # Purpose: Raw data ingestion from sources into Bronze Delta tables
 # Author: Diego Mayorga
 # Date: 2026-01-06
+# Compute: Serverless (workspace requirement)
 # 
 # =============================================================================
 
@@ -13,7 +14,7 @@ resources:
     bronze_layer_pipeline:
       name: "Bronze Layer - Daily Ingestion"
       description: |
-        Raw data ingestion pipeline:
+        Raw data ingestion pipeline (Serverless):
         - Master PDV from CSV
         - Master Products from CSV
         - Price Audit from CSV
@@ -22,26 +23,7 @@ resources:
       tags:
         project: "BI_Market_Visibility"
         layer: "bronze"
-        environment: "${bundle.target}"
         owner: "diego.mayorgacapera@gmail.com"
-      
-      # ─────────────────────────────────────────────────────────────────────
-      # CLUSTER CONFIGURATION
-      # ─────────────────────────────────────────────────────────────────────
-      job_clusters:
-        - job_cluster_key: "bronze_cluster"
-          new_cluster:
-            spark_version: "14.3.x-scala2.12"
-            node_type_id: "Standard_DS3_v2"
-            num_workers: 1
-            autoscale:
-              min_workers: 1
-              max_workers: 2
-            spark_conf:
-              "spark.databricks.delta.optimizeWrite.enabled": "true"
-              "spark.databricks.delta.autoCompact.enabled": "true"
-            spark_env_vars:
-              PYSPARK_PYTHON: "/databricks/python3/bin/python3"
       
       # ─────────────────────────────────────────────────────────────────────
       # NOTIFICATIONS
@@ -54,7 +36,7 @@ resources:
       # ─────────────────────────────────────────────────────────────────────
       # TIMEOUT POLICY
       # ─────────────────────────────────────────────────────────────────────
-      timeout_seconds: 3600  # 1 hour max
+      timeout_seconds: 3600
       
       # ─────────────────────────────────────────────────────────────────────
       # SCHEDULE: Daily at 3 AM (Bogota timezone)
@@ -65,29 +47,21 @@ resources:
         pause_status: "PAUSED"
       
       # ═══════════════════════════════════════════════════════════════════════
-      # TASK DEFINITIONS
+      # TASK DEFINITIONS (Serverless Compute)
       # ═══════════════════════════════════════════════════════════════════════
       tasks:
         - task_key: "bronze_ingestion"
           description: "Ingest raw data from CSV sources into Bronze Delta tables"
-          job_cluster_key: "bronze_cluster"
           notebook_task:
-            notebook_path: "/Repos/BI_Market_Visibility/notebooks/bronze/01_bronze_ingestion"
-            base_parameters:
-              catalog: "${var.catalog}"
-              schema: "${var.schema}"
+            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/notebooks/bronze/01_bronze_ingestion"
             source: "WORKSPACE"
           timeout_seconds: 1800
         
         - task_key: "bronze_drift_monitoring"
           description: "Schema drift detection for Bronze layer"
-          job_cluster_key: "bronze_cluster"
           depends_on:
             - task_key: "bronze_ingestion"
           notebook_task:
-            notebook_path: "/Repos/BI_Market_Visibility/monitoring/drift_monitoring_bronze"
-            base_parameters:
-              catalog: "${var.catalog}"
-              schema: "${var.schema}"
+            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/BI_Market_Visibility/monitoring/drift_monitoring_bronze"
             source: "WORKSPACE"
           timeout_seconds: 600
