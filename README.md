@@ -67,9 +67,10 @@ BI_Market_Visibility/
 │   └── tests/
 │       └── test_gold_layer.py         # 40+ assertions ✨ NEW
 ├── docs/
-│   ├── GOLD_ARCHITECTURE_DESIGN.md    # Design + 9 ADRs ✨ NEW
-│   ├── POWERBI_INTEGRATION_GUIDE.md   # Connection guide ✨ NEW
-│   ├── GOLD_IMPLEMENTATION_SUMMARY.md # Executive summary ✨ NEW
+│   ├── GOLD_ARCHITECTURE_DESIGN.md    # Design + 9 ADRs
+│   ├── SILVER_ARCHITECTURE_DECISIONS.md # Silver ADRs ✨ NEW
+│   ├── POWERBI_INTEGRATION_GUIDE.md   # Connection guide
+│   ├── GOLD_IMPLEMENTATION_SUMMARY.md # Executive summary
 │   ├── BRONZE_ARCHITECTURE_DECISIONS.md
 │   ├── data_dictionary.md
 │   └── architecture/
@@ -115,10 +116,11 @@ pyspark >= 3.5
 
 | Document | Content |
 |----------|---------|
-| [GOLD_ARCHITECTURE_DESIGN.md](docs/GOLD_ARCHITECTURE_DESIGN.md) | Technical design + 9 ADRs |
+| [BRONZE_ARCHITECTURE_DECISIONS.md](docs/BRONZE_ARCHITECTURE_DECISIONS.md) | Bronze layer ADRs |
+| [SILVER_ARCHITECTURE_DECISIONS.md](docs/SILVER_ARCHITECTURE_DECISIONS.md) | Silver layer ADRs ✨ NEW |
+| [GOLD_ARCHITECTURE_DESIGN.md](docs/GOLD_ARCHITECTURE_DESIGN.md) | Gold layer design + 9 ADRs |
 | [POWERBI_INTEGRATION_GUIDE.md](docs/POWERBI_INTEGRATION_GUIDE.md) | BI connection + DAX |
 | [GOLD_IMPLEMENTATION_SUMMARY.md](docs/GOLD_IMPLEMENTATION_SUMMARY.md) | Executive summary |
-| [BRONZE_ARCHITECTURE_DECISIONS.md](docs/BRONZE_ARCHITECTURE_DECISIONS.md) | Bronze design rationale |
 | [data_dictionary.md](docs/data_dictionary.md) | Schema definitions |
 
 ## 🧪 Testing
