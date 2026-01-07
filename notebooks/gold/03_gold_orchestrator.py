@@ -236,81 +236,54 @@ BUSINESS_CONFIG = {
     "date_end": "2026-12-31",
     
     # Stock calculation assumptions
-    "default_lead_time_days": 7,
-    "stock_out_threshold_days": 0,
-    "overstock_threshold_days": 45,
-    
-    # Price competitiveness thresholds
-    "price_variance_tolerance": 0.05,  # 5% tolerance
-    "price_index_baseline": 100.0,
-    
-    # Market share calculation
-    "market_share_lookback_days": 30,
-    
-    # Lost sales estimation
-    "avg_daily_sales_lookback": 14
-}
+    import os
+    # Unity Catalog configuration (production-ready)
+    CATALOG = os.getenv("UNITY_CATALOG", "main")
+    SCHEMA_SILVER = os.getenv("UC_SCHEMA_SILVER", "silver")
+    SCHEMA_GOLD   = os.getenv("UC_SCHEMA_GOLD", "gold")
 
-# -----------------------------------------------------------------------------
-# SERVERLESS OPTIMIZATION FLAGS
-# -----------------------------------------------------------------------------
-SERVERLESS_CONFIG = {
-    "use_broadcast_joins": True,
-    "max_broadcast_size_mb": 10,
-    "partition_by_date": True,
-    "coalesce_small_files": True,
-    "target_file_size_mb": 128
-}
+    # Table references (Silver)
+    SILVER_TABLES = {
+        "master_pdv": f"{CATALOG}.{SCHEMA_SILVER}.silver_master_pdv",
+        "master_products": f"{CATALOG}.{SCHEMA_SILVER}.silver_master_products",
+        "price_audit": f"{CATALOG}.{SCHEMA_SILVER}.silver_price_audit",
+        "sell_in": f"{CATALOG}.{SCHEMA_SILVER}.silver_sell_in"
+    }
 
-print("✅ Gold Layer Configuration Loaded")
-print(f"   Catalog: {CATALOG}")
-print(f"   Schema: {SCHEMA}")
-print(f"   Silver Tables: {len(SILVER_TABLES)}")
-print(f"   Gold Tables: {len(GOLD_TABLES)}")
+    # Table references (Gold)
+    GOLD_TABLES = {
+        "dim_date": f"{CATALOG}.{SCHEMA_GOLD}.gold_dim_date",
+        "dim_product": f"{CATALOG}.{SCHEMA_GOLD}.gold_dim_product",
+        "dim_pdv": f"{CATALOG}.{SCHEMA_GOLD}.gold_dim_pdv",
+        "fact_sell_in": f"{CATALOG}.{SCHEMA_GOLD}.gold_fact_sell_in",
+        "fact_price_audit": f"{CATALOG}.{SCHEMA_GOLD}.gold_fact_price_audit",
+        "fact_stock": f"{CATALOG}.{SCHEMA_GOLD}.gold_fact_stock",
+        "kpi_market_visibility": f"{CATALOG}.{SCHEMA_GOLD}.gold_kpi_market_visibility_daily",
+        "kpi_market_share": f"{CATALOG}.{SCHEMA_GOLD}.gold_kpi_market_share",
+        "kpi_price_elasticity": f"{CATALOG}.{SCHEMA_GOLD}.gold_kpi_price_elasticity",
+        "kpi_perfect_store_score": f"{CATALOG}.{SCHEMA_GOLD}.gold_kpi_perfect_store_score",
+        "kpi_stock_out_pattern": f"{CATALOG}.{SCHEMA_GOLD}.gold_kpi_stock_out_pattern",
+        "kpi_channel_cannibalization": f"{CATALOG}.{SCHEMA_GOLD}.gold_kpi_channel_cannibalization",
+        "kpi_lost_sales_root_cause": f"{CATALOG}.{SCHEMA_GOLD}.gold_kpi_lost_sales_root_cause",
+        "kpi_geographic_opportunity_score": f"{CATALOG}.{SCHEMA_GOLD}.gold_kpi_geographic_opportunity_score",
+        "kpi_price_war_alert": f"{CATALOG}.{SCHEMA_GOLD}.gold_kpi_price_war_alert",
+        "kpi_product_lifecycle_stage": f"{CATALOG}.{SCHEMA_GOLD}.gold_kpi_product_lifecycle_stage",
+        "kpi_channel_profitability_index": f"{CATALOG}.{SCHEMA_GOLD}.gold_kpi_channel_profitability_index",
+        "kpi_predictive_stock_out_risk": f"{CATALOG}.{SCHEMA_GOLD}.gold_kpi_predictive_stock_out_risk"
+    }
 
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 2. Shared Utility Functions
-
-# COMMAND ----------
-
-# =============================================================================
-# SURROGATE KEY GENERATION
-# =============================================================================
-
-def generate_surrogate_key(*cols):
-    """
-    Generate a deterministic surrogate key from business key columns.
-    Uses SHA-256 hash truncated to 16 characters for uniqueness.
-    
-    Args:
-        *cols: Column names to include in the key
-        
-    Returns:
-        Column expression generating the surrogate key
-    """
-    return sha2(concat_ws("||", *[col(c).cast(StringType()) for c in cols]), 256).substr(1, 16)
-
-
-def generate_date_sk(date_col):
-    """
-    Generate integer surrogate key from date in YYYYMMDD format.
-    
-    Args:
-        date_col: Column containing date
-        
-    Returns:
-        Column expression with integer date key
-    """
-    return date_format(col(date_col), "yyyyMMdd").cast(IntegerType())
-
-
-# =============================================================================
-# SCD TYPE 2 UTILITIES
-# =============================================================================
-
-def apply_scd2_merge(spark, target_table, source_df, business_keys, attribute_cols, sk_col):
+    # Business configuration
+    BUSINESS_CONFIG = {
+        "date_start": "2022-01-01",
+        "date_end": "2026-12-31",
+        "default_lead_time_days": 7,
+        "stock_out_threshold_days": 0,
+        "overstock_threshold_days": 45,
+        "price_variance_tolerance": 0.05,
+        "price_index_baseline": 100.0,
+        "market_share_lookback_days": 30,
+        "avg_daily_sales_lookback": 14
+    }
     """
     Apply SCD Type 2 merge logic for slowly changing dimensions.
     
