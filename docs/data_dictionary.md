@@ -590,8 +590,20 @@ Source System B → Bronze.raw_table_b → Silver.cleaned_table_b → Gold.dim_p
 
 | Term | Definition | Example |
 |------|------------|---------|
-| [Term 1] | [Clear business definition] | [Example usage] |
-| [Term 2] | [Clear business definition] | [Example usage] |
+| Sell-In | Units sold from manufacturer to retailer (not consumer) | 150 units sold to PDV001 in Jan 2026 |
+| Sell-Out | Estimated units sold from retailer to consumer (not always observed) | 120 units estimated for PDV001 in Jan 2026 |
+| SCD2 (Slowly Changing Dimension Type 2) | Dimension modeling technique that tracks historical changes with `valid_from`, `valid_to`, `is_current` | Store changes region, both versions kept with different validity dates |
+| Portfolio Share | % of total sales volume/value represented by the company’s brands (not full market share) | 25.5% portfolio share for NESCAFE in HOT DRINKS |
+| Availability Rate | % of stores (PDVs) with at least one unit in stock during the period | 92% availability for NESCAFE in Jan 2026 |
+| Price Competitiveness Index | Ratio of observed price to market average, expressed as a percentage | 98.5 means price is 1.5% below market average |
+| Gold Layer | Analytics-ready tables (star schema, SCD2, pre-aggregated KPIs) for BI consumption | gold_fact_sell_in, gold_kpi_market_share |
+| Silver Layer | Standardized, deduplicated, quality-checked tables (no business KPIs) | silver_master_pdv, silver_price_audit |
+| Bronze Layer | Raw ingested data with audit metadata, no business logic | bronze_master_pdv, bronze_sell_in |
+| PDV | Punto de Venta (Point of Sale) – retail location tracked in the model | PDV001, SUPERMARKET ABC |
+| KPI | Key Performance Indicator, pre-aggregated in Gold layer for BI | availability_rate, portfolio_share_qty_pct |
+| Partition | Table division for performance, typically by date_sk or year_month | gold_fact_sell_in partitioned by date_sk |
+| Surrogate Key | Hash-based unique identifier for dimension/fact rows | pdv_sk, product_sk |
+| DirectQuery | Power BI mode that queries data live from Databricks Gold tables | Power BI dashboard refreshes in <2s |
 
 ---
 
