@@ -2,6 +2,8 @@
 # MAGIC %md
 # MAGIC # Gold Layer - Orchestrator & Configuration
 # MAGIC 
+# MAGIC ## PRODUCTION HARDENING: Absolute paths, explicit catalog/schema, fail-fast validation
+# MAGIC 
 # MAGIC **Purpose:** Central configuration and orchestration for the modular Gold Layer architecture. This notebook does NOT process data directly - it defines shared configuration and provides execution options for independent Gold jobs.
 # MAGIC 
 # MAGIC **Author:** Diego Mayorga  
@@ -181,7 +183,9 @@ from datetime import datetime, timedelta
 # UNITY CATALOG CONFIGURATION
 # =============================================================================
 
-CATALOG = "workspace"
+import os
+# Parametrize CATALOG by environment variable, fallback to dev default
+CATALOG = os.getenv("UNITY_CATALOG", "hive_metastore")  # Set UNITY_CATALOG env var in prod
 SCHEMA = "default"
 
 # -----------------------------------------------------------------------------
@@ -197,20 +201,30 @@ SILVER_TABLES = {
 # -----------------------------------------------------------------------------
 # GOLD LAYER (OUTPUT - WRITE)
 # -----------------------------------------------------------------------------
+
 GOLD_TABLES = {
     # Dimensions
     "dim_date": f"{CATALOG}.{SCHEMA}.gold_dim_date",
     "dim_product": f"{CATALOG}.{SCHEMA}.gold_dim_product",
     "dim_pdv": f"{CATALOG}.{SCHEMA}.gold_dim_pdv",
-    
     # Facts
     "fact_sell_in": f"{CATALOG}.{SCHEMA}.gold_fact_sell_in",
     "fact_price_audit": f"{CATALOG}.{SCHEMA}.gold_fact_price_audit",
     "fact_stock": f"{CATALOG}.{SCHEMA}.gold_fact_stock",
-    
-    # KPIs
+    # KPIs (core)
     "kpi_market_visibility": f"{CATALOG}.{SCHEMA}.gold_kpi_market_visibility_daily",
-    "kpi_market_share": f"{CATALOG}.{SCHEMA}.gold_kpi_market_share"
+    "kpi_market_share": f"{CATALOG}.{SCHEMA}.gold_kpi_market_share",
+    # Advanced KPIs
+    "kpi_price_elasticity": f"{CATALOG}.{SCHEMA}.gold_kpi_price_elasticity",
+    "kpi_perfect_store_score": f"{CATALOG}.{SCHEMA}.gold_kpi_perfect_store_score",
+    "kpi_stock_out_pattern": f"{CATALOG}.{SCHEMA}.gold_kpi_stock_out_pattern",
+    "kpi_channel_cannibalization": f"{CATALOG}.{SCHEMA}.gold_kpi_channel_cannibalization",
+    "kpi_lost_sales_root_cause": f"{CATALOG}.{SCHEMA}.gold_kpi_lost_sales_root_cause",
+    "kpi_geographic_opportunity_score": f"{CATALOG}.{SCHEMA}.gold_kpi_geographic_opportunity_score",
+    "kpi_price_war_alert": f"{CATALOG}.{SCHEMA}.gold_kpi_price_war_alert",
+    "kpi_product_lifecycle_stage": f"{CATALOG}.{SCHEMA}.gold_kpi_product_lifecycle_stage",
+    "kpi_channel_profitability_index": f"{CATALOG}.{SCHEMA}.gold_kpi_channel_profitability_index",
+    "kpi_predictive_stock_out_risk": f"{CATALOG}.{SCHEMA}.gold_kpi_predictive_stock_out_risk"
 }
 
 # -----------------------------------------------------------------------------
@@ -314,51 +328,46 @@ def apply_scd2_merge(spark, target_table, source_df, business_keys, attribute_co
         sk_col: Surrogate key column name
     """
     from delta.tables import DeltaTable
-    
-    # Check if target exists
-    if not spark._jsparkSession.catalog().tableExists(target_table):
-        # Initial load - insert all with SCD2 metadata
-        initial_df = source_df \
-            .withColumn("valid_from", current_date()) \
-            .withColumn("valid_to", lit("9999-12-31").cast(DateType())) \
+    from pyspark.sql.functions import current_date, lit
+    if not spark.catalog.tableExists(target_table):
+        (
+            source_df
+            .withColumn("valid_from", current_date())
+            .withColumn("valid_to", lit("9999-12-31").cast("date"))
             .withColumn("is_current", lit(True))
-        
-        initial_df.write \
-            .format("delta") \
-            .mode("overwrite") \
-            .option("delta.columnMapping.mode", "name") \
+            .write.format("delta")
+            .mode("overwrite")
+            .option("delta.columnMapping.mode", "name")
             .saveAsTable(target_table)
+        )
         return
-    
-    # Build change detection condition
-    change_conditions = [f"target.{c} <> source.{c}" for c in attribute_cols]
-    change_condition = " OR ".join(change_conditions)
-    
-    # Build merge key condition
-    merge_key_condition = " AND ".join([f"target.{k} = source.{k}" for k in business_keys])
-    
-    delta_table = DeltaTable.forName(spark, target_table)
-    
-    # Prepare source with SCD2 columns
-    source_with_scd2 = source_df \
-        .withColumn("valid_from", current_date()) \
-        .withColumn("valid_to", lit("9999-12-31").cast(DateType())) \
-        .withColumn("is_current", lit(True))
-    
-    # MERGE operation
-    delta_table.alias("target").merge(
-        source_with_scd2.alias("source"),
-        f"{merge_key_condition} AND target.is_current = true"
-    ).whenMatchedUpdate(
-        condition=change_condition,
-        set={
-            "valid_to": "current_date()",
-            "is_current": "false"
-        }
-    ).whenNotMatchedInsertAll().execute()
-    
-    # Insert new versions for changed records
-    # This requires a second pass - handled by the dimension notebooks
+    delta = DeltaTable.forName(spark, target_table)
+    join_cond = " AND ".join([f"t.{k} = s.{k}" for k in business_keys])
+    change_cond = " OR ".join([f"t.{c} <> s.{c}" for c in attribute_cols])
+    from pyspark.sql.functions import col
+    (
+        delta.alias("t")
+        .merge(
+            source_df.alias("s"),
+            f"{join_cond} AND t.is_current = true"
+        )
+        .whenMatchedUpdate(
+            condition=change_cond,
+            set={
+                "is_current": lit(False),
+                "valid_to": current_date()
+            }
+        )
+        .whenNotMatchedInsert(
+            values={
+                **{c: col(f"s.{c}") for c in source_df.columns},
+                "valid_from": current_date(),
+                "valid_to": lit("9999-12-31").cast("date"),
+                "is_current": lit(True)
+            }
+        )
+        .execute()
+    )
 
 
 # =============================================================================
@@ -407,7 +416,7 @@ def write_gold_table_incremental(df, table_name, merge_keys, partition_col=None)
     # Check if table exists
     if not spark._jsparkSession.catalog().tableExists(table_name):
         # Initial load
-        writer = df.write.format("delta").mode("overwrite")
+        writer = df.write.format("delta").mode("overwrite").option("delta.columnMapping.mode", "name")
         if partition_col:
             writer = writer.partitionBy(partition_col)
         writer.saveAsTable(table_name)
@@ -525,23 +534,35 @@ PIPELINE_STATE = {
 }
 
 # Notebook execution phases (dependency order)
+
+BASE_PATH = "/Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/notebooks"
 PIPELINE_PHASES = {
     "phase_1_dimensions": [
-        ("gold_dim_date", "./dimensions/gold_dim_date"),
-        ("gold_dim_product", "./dimensions/gold_dim_product"),
-        ("gold_dim_pdv", "./dimensions/gold_dim_pdv"),
+        ("gold_dim_date", f"{BASE_PATH}/gold/dimensions/gold_dim_date"),
+        ("gold_dim_product", f"{BASE_PATH}/gold/dimensions/gold_dim_product"),
+        ("gold_dim_pdv", f"{BASE_PATH}/gold/dimensions/gold_dim_pdv"),
     ],
     "phase_2_facts": [
-        ("gold_fact_sell_in", "./facts/gold_fact_sell_in"),
-        ("gold_fact_price_audit", "./facts/gold_fact_price_audit"),
-        ("gold_fact_stock", "./facts/gold_fact_stock"),
+        ("gold_fact_sell_in", f"{BASE_PATH}/gold/facts/gold_fact_sell_in"),
+        ("gold_fact_price_audit", f"{BASE_PATH}/gold/facts/gold_fact_price_audit"),
+        ("gold_fact_stock", f"{BASE_PATH}/gold/facts/gold_fact_stock"),
     ],
     "phase_3_kpis": [
-        ("gold_kpi_market_visibility", "./kpis/gold_kpi_market_visibility"),
-        ("gold_kpi_market_share", "./kpis/gold_kpi_market_share"),
+        ("gold_kpi_market_visibility", f"{BASE_PATH}/gold/kpis/gold_kpi_market_visibility"),
+        ("gold_kpi_market_share", f"{BASE_PATH}/gold/kpis/gold_kpi_market_share"),
+        ("gold_kpi_price_elasticity", f"{BASE_PATH}/gold/kpis/gold_kpi_price_elasticity"),
+        ("gold_kpi_perfect_store_score", f"{BASE_PATH}/gold/kpis/gold_kpi_perfect_store_score"),
+        ("gold_kpi_stock_out_pattern", f"{BASE_PATH}/gold/kpis/gold_kpi_stock_out_pattern"),
+        ("gold_kpi_channel_cannibalization", f"{BASE_PATH}/gold/kpis/gold_kpi_channel_cannibalization"),
+        ("gold_kpi_lost_sales_root_cause", f"{BASE_PATH}/gold/kpis/gold_kpi_lost_sales_root_cause"),
+        ("gold_kpi_geographic_opportunity_score", f"{BASE_PATH}/gold/kpis/gold_kpi_geographic_opportunity_score"),
+        ("gold_kpi_price_war_alert", f"{BASE_PATH}/gold/kpis/gold_kpi_price_war_alert"),
+        ("gold_kpi_product_lifecycle_stage", f"{BASE_PATH}/gold/kpis/gold_kpi_product_lifecycle_stage"),
+        ("gold_kpi_channel_profitability_index", f"{BASE_PATH}/gold/kpis/gold_kpi_channel_profitability_index"),
+        ("gold_kpi_predictive_stock_out_risk", f"{BASE_PATH}/gold/kpis/gold_kpi_predictive_stock_out_risk"),
     ],
     "phase_4_validation": [
-        ("gold_validation", "./validation/gold_validation"),
+        ("gold_validation", f"{BASE_PATH}/gold/validation/gold_validation"),
     ]
 }
 
@@ -570,21 +591,30 @@ def run_notebook_safe(notebook_name: str, notebook_path: str, timeout: int = 360
     }
     
     try:
-        print(f"🚀 Starting: {notebook_name}")
+        print(f"🚀 Starting: {notebook_name} at {notebook_path}")
         dbutils.notebook.run(notebook_path, timeout)
         
         end_time = datetime.now()
         result["status"] = "SUCCESS"
         result["duration_seconds"] = (end_time - start_time).total_seconds()
         print(f"✅ Completed: {notebook_name} ({result['duration_seconds']:.1f}s)")
-        
+        # Post-execution: fail-fast validation
+        # Set catalog/schema context for validation
+        spark.sql(f"USE CATALOG {CATALOG}")
+        spark.sql(f"USE SCHEMA {SCHEMA}")
+        table_name = GOLD_TABLES.get(notebook_name.replace('gold_', ''), None)
+        DIMENSIONS_SCD2 = {GOLD_TABLES['dim_product'], GOLD_TABLES['dim_pdv']}
+        if table_name:
+            if not spark.catalog.tableExists(table_name):
+                raise Exception(f"{table_name} was not created by notebook {notebook_name}")
+            # Zero-compute: solo valida existencia, no volumen
+            # Volumen y calidad se validan en gold_validation
     except Exception as e:
         end_time = datetime.now()
         result["status"] = "FAILED"
         result["duration_seconds"] = (end_time - start_time).total_seconds()
         result["error"] = str(e)
         print(f"❌ Failed: {notebook_name} - {str(e)}")
-    
     return result
 
 
@@ -645,24 +675,13 @@ def execute_gold_pipeline() -> dict:
     print(f"\n⏰ Started at: {pipeline_start.isoformat()}")
     print(f"📋 Configuration: {PIPELINE_CONFIG}")
     
-    all_results = {}
-    pipeline_failed = False
-    
-    # Phase 1: Dimensions (can be parallel since no dependencies)
-    phase_1_results = run_phase(
-        "phase_1_dimensions",
-        PIPELINE_PHASES["phase_1_dimensions"],
-        parallel=PIPELINE_CONFIG["parallel_dimensions"]
-    )
-    all_results["phase_1_dimensions"] = phase_1_results
-    
-    if any(r["status"] == "FAILED" for r in phase_1_results):
-        pipeline_failed = True
-        if PIPELINE_CONFIG["stop_on_error"]:
-            print("\n⛔ Pipeline aborted after Phase 1 failures")
-            return generate_pipeline_summary(all_results, pipeline_start, "ABORTED")
-    
-    # Phase 2: Facts (depend on dimensions)
+    results = []
+    timeout = PIPELINE_CONFIG["timeout_seconds"]
+    # Ejecuta notebooks secuencialmente, sin modo paralelo
+    for nb in notebooks:
+        result = run_notebook_safe(nb[0], nb[1], timeout)
+        results.append(result)
+    return results
     phase_2_results = run_phase(
         "phase_2_facts",
         PIPELINE_PHASES["phase_2_facts"],

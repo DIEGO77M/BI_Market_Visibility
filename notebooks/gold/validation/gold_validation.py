@@ -50,9 +50,20 @@ GOLD_TABLES = {
     "fact_sell_in": f"{CATALOG}.{SCHEMA}.gold_fact_sell_in",
     "fact_price_audit": f"{CATALOG}.{SCHEMA}.gold_fact_price_audit",
     "fact_stock": f"{CATALOG}.{SCHEMA}.gold_fact_stock",
-    # KPIs
+    # KPIs (core)
     "kpi_market_visibility": f"{CATALOG}.{SCHEMA}.gold_kpi_market_visibility_daily",
-    "kpi_market_share": f"{CATALOG}.{SCHEMA}.gold_kpi_market_share"
+    "kpi_market_share": f"{CATALOG}.{SCHEMA}.gold_kpi_market_share",
+    # Advanced KPIs
+    "kpi_price_elasticity": f"{CATALOG}.{SCHEMA}.gold_kpi_price_elasticity",
+    "kpi_perfect_store_score": f"{CATALOG}.{SCHEMA}.gold_kpi_perfect_store_score",
+    "kpi_stock_out_pattern": f"{CATALOG}.{SCHEMA}.gold_kpi_stock_out_pattern",
+    "kpi_channel_cannibalization": f"{CATALOG}.{SCHEMA}.gold_kpi_channel_cannibalization",
+    "kpi_lost_sales_root_cause": f"{CATALOG}.{SCHEMA}.gold_kpi_lost_sales_root_cause",
+    "kpi_geographic_opportunity_score": f"{CATALOG}.{SCHEMA}.gold_kpi_geographic_opportunity_score",
+    "kpi_price_war_alert": f"{CATALOG}.{SCHEMA}.gold_kpi_price_war_alert",
+    "kpi_product_lifecycle_stage": f"{CATALOG}.{SCHEMA}.gold_kpi_product_lifecycle_stage",
+    "kpi_channel_profitability_index": f"{CATALOG}.{SCHEMA}.gold_kpi_channel_profitability_index",
+    "kpi_predictive_stock_out_risk": f"{CATALOG}.{SCHEMA}.gold_kpi_predictive_stock_out_risk"
 }
 
 # Validation thresholds

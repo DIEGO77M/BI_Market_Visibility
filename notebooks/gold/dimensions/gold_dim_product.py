@@ -56,12 +56,38 @@ from pyspark.sql.types import StringType, DateType, BooleanType
 from delta.tables import DeltaTable
 
 # Unity Catalog
-CATALOG = "workspace"
+CATALOG = ""
 SCHEMA = "default"
 
-# Source and Target tables
-SILVER_MASTER_PRODUCTS = f"{CATALOG}.{SCHEMA}.silver_master_products"
-GOLD_DIM_PRODUCT = f"{CATALOG}.{SCHEMA}.gold_dim_product"
+SILVER_MASTER_PRODUCTS = f"{SCHEMA}.silver_master_products"
+GOLD_DIM_PRODUCT = f"{SCHEMA}.gold_dim_product"
+
+# Column renaming for Silver price audit
+SILVER_PRICE_AUDIT = f"{SCHEMA}.silver_price_audit"
+SILVER_PRICE_AUDIT_RENAMED = f"{SCHEMA}.silver_price_audit_renamed"
+
+def rename_silver_price_audit_columns(spark):
+    df = spark.read.table(SILVER_PRICE_AUDIT)
+    df_renamed = df.select(
+        col("fecha").alias("date"),
+        col("nombre_del_punto_de_venta").alias("store_name"),
+        col("cod_pdv").alias("pdv_code"),
+        col("nombre_producto").alias("product_name"),
+        col("cod_producto").alias("product_code"),
+        col("precio").alias("price"),
+        col("tiene_este_producto_una_promocion_").alias("has_promotion"),
+        col("promotional_price").alias("promotional_price"),
+        col("comentarios").alias("comments"),
+        col("competitive_group").alias("competitive_group"),
+        col("_metadata_file_path"),
+        col("year"),
+        col("month"),
+        col("year_month"),
+        col("processing_date"),
+        col("processing_timestamp")
+    )
+    df_renamed.write.format("delta").mode("overwrite").saveAsTable(SILVER_PRICE_AUDIT_RENAMED)
+    print(f"✅ Columnas renombradas y tabla escrita como {SILVER_PRICE_AUDIT_RENAMED}")
 
 # Business key and tracked attributes
 BUSINESS_KEY = "product_code"

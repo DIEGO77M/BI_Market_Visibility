@@ -53,12 +53,12 @@ from pyspark.sql.types import StringType, DateType, BooleanType, DoubleType
 from delta.tables import DeltaTable
 
 # Unity Catalog
-CATALOG = "workspace"
+CATALOG = ""
 SCHEMA = "default"
 
 # Source and Target tables
-SILVER_MASTER_PDV = f"{CATALOG}.{SCHEMA}.silver_master_pdv"
-GOLD_DIM_PDV = f"{CATALOG}.{SCHEMA}.gold_dim_pdv"
+SILVER_MASTER_PDV = f"{SCHEMA}.silver_master_pdv"
+GOLD_DIM_PDV = f"{SCHEMA}.gold_dim_pdv"
 
 # Business key and tracked attributes
 BUSINESS_KEY = "code_eleader"

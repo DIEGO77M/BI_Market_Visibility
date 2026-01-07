@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # Silver Layer - Data Standardization & Quality
 # MAGIC 
-# MAGIC **Purpose:** Transform Bronze snapshots into analysis-ready datasets with consistent schema, validated domains, and deterministic quality controls.
+# MAGIC **Purpose:** Transform Bronze snapshots into analysis-ready datasets with consistent schema, validated domains, and deterministic quality controls. All columns are standardized to English and snake_case, following the project data dictionary.
 # MAGIC 
 # MAGIC **Author:** Diego Mayorga  
 # MAGIC **Date:** 2025-12-30  
@@ -12,7 +12,7 @@
 # MAGIC 
 # MAGIC ## Design Philosophy
 # MAGIC 
-# MAGIC Silver Layer implements **curated standardization** with minimal yet sufficient transformations for analytical consumption. This layer bridges raw ingestion (Bronze) and business logic (Gold) by establishing data contracts through schema normalization, domain validation, and deterministic deduplication.
+# MAGIC Silver Layer implements **curated standardization** with minimal yet sufficient transformations for analytical consumption. This layer bridges raw ingestion (Bronze) and business logic (Gold) by establishing data contracts through schema normalization, domain validation, and deterministic deduplication. All column names are converted to English and snake_case for cross-platform compatibility and business clarity.
 # MAGIC 
 # MAGIC ### Architectural Decisions
 # MAGIC 
@@ -87,14 +87,36 @@ from pyspark.sql.functions import (
 # --- Utility: Standardize column names to snake_case ---
 def standardize_column_names(df, exclude_cols=None):
     """
-    Convert all column names to snake_case.
+    Convert all column names to snake_case and English.
     Args:
         df: DataFrame to standardize
         exclude_cols: List of columns to preserve (e.g., partition keys)
     Returns:
-        DataFrame with standardized column names
+        DataFrame with standardized column names in English
     """
     exclude_cols = exclude_cols or []
+    # Spanish to English mapping (extend as needed)
+    spanish_to_english = {
+        "precio": "price",
+        "fecha": "date",
+        "pdv": "store_code",
+        "codigo_pdv": "store_code",
+        "producto": "product_code",
+        "canal": "channel",
+        "motivo": "reason",
+        "observacion": "observation",
+        "stock": "stock",
+        "venta": "sales",
+        "marca": "brand",
+        "categoria": "category",
+        "subcategoria": "subcategory",
+        "region": "region",
+        "zona": "zone",
+        "ciudad": "city",
+        "estado": "state",
+        "pais": "country",
+        "nombre": "name"
+    }
     for old_name in df.columns:
         if old_name in exclude_cols:
             continue
@@ -102,7 +124,11 @@ def standardize_column_names(df, exclude_cols=None):
         new_name = new_name.replace(" ", "_").replace("-", "_")
         new_name = new_name.replace("(", "").replace(")", "")
         new_name = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in new_name)
+        # Map Spanish to English if applicable
+        if new_name in spanish_to_english:
+            new_name = spanish_to_english[new_name]
         df = df.withColumnRenamed(old_name, new_name)
+    return df
     return df
 
 from pyspark.sql.types import StringType, IntegerType, DoubleType, DecimalType, DateType, TimestampType

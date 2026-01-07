@@ -1,0 +1,338 @@
+INSIGHTS AVANZADOS PARA MARKET VISIBILITY - BI PROJECT
+=====================================================================
+
+Basado en análisis de capas Silver y Gold
+Autor: Análisis Data Analyst Expert
+Fecha: 2026-01-06
+
+=====================================================================
+
+🎯 INSIGHTS AVANZADOS DE ALTO IMPACTO
+
+=====================================================================
+
+INSIGHT 1: PRICE ELASTICITY BY CHANNEL
+---------------------------------------
+Nombre: Elasticidad de Precio por Canal
+
+Pregunta de Negocio: 
+"¿Cómo afectan los cambios de precio a las ventas en cada canal? 
+¿Dónde puedo ser más agresivo con descuentos?"
+
+Cálculo:
+Price_Elasticity = 
+  % Change in Quantity Sold / % Change in Price
+
+Específicamente:
+  ((Current_Qty - Previous_Qty) / Previous_Qty) / 
+  ((Current_Price - Previous_Price) / Previous_Price)
+
+Usando tablas existentes:
+- FROM: gold_fact_sell_in (quantity_sell_in)
+- JOIN: gold_fact_price_audit (observed_price)
+- GROUP BY: channel, brand, year_month
+- WINDOW: LAG() para período anterior
+
+Impacto: 
+Optimizar estrategia de pricing por canal (Modern Trade vs Traditional 
+Trade tiene diferente sensibilidad)
+
+=====================================================================
+
+INSIGHT 2: PERFECT STORE SCORE
+-------------------------------
+Nombre: Índice de Tienda Perfecta
+
+Pregunta de Negocio: 
+"¿Qué PDVs cumplen con todos los estándares de excelencia operativa 
+y cuáles necesitan intervención urgente?"
+
+Cálculo:
+Perfect_Store_Score = (
+  (Availability_Rate × 0.30) +           -- Tiene stock
+  (Price_Index_Compliance × 0.25) +      -- Precio en rango 95-105
+  (Stock_Health_Days × 0.25) +           -- 7-30 días stock
+  (Sell_Through_Rate × 0.20)             -- Rotación saludable
+) × 100
+
+Donde:
+- Availability_Rate: FROM gold_fact_stock (is_healthy_stock)
+- Price_Index_Compliance: FROM gold_fact_price_audit (price_index BETWEEN 95 AND 105)
+- Stock_Health_Days: FROM gold_fact_stock (stock_days BETWEEN 7 AND 30)
+- Sell_Through_Rate: FROM gold_fact_sell_in / gold_fact_stock (velocity)
+
+GROUP BY: pdv_sk, date_sk
+
+Impacto: 
+Identificar PDVs top performers vs problematic, priorizar visitas 
+de merchandisers
+
+=====================================================================
+
+INSIGHT 3: STOCK-OUT FREQUENCY & PATTERN
+-----------------------------------------
+Nombre: Patrón de Quiebres de Stock
+
+Pregunta de Negocio: 
+"¿Qué productos tienen quiebres recurrentes? ¿Hay patrones temporales 
+(día de semana, fin de mes)?"
+
+Cálculo:
+Stock_Out_Frequency = 
+  COUNT(DISTINCT date_sk WHERE stock_out_flag = TRUE) /
+  COUNT(DISTINCT date_sk) × 100
+
+Stock_Out_Clustering_Index =
+  CASE 
+    WHEN consecutive_stock_out_days >= 3 THEN 'CHRONIC'
+    WHEN stock_outs_last_30_days >= 5 THEN 'FREQUENT'
+    WHEN stock_outs_last_30_days BETWEEN 1 AND 4 THEN 'OCCASIONAL'
+    ELSE 'HEALTHY'
+  END
+
+FROM: gold_fact_stock
+GROUP BY: product_sk, pdv_sk
+JOIN: gold_dim_date (day_of_week, is_month_end)
+
+Impacto: 
+Detectar problemas sistémicos de supply chain vs issues puntuales
+
+=====================================================================
+
+INSIGHT 4: CHANNEL CANNIBALIZATION INDEX
+-----------------------------------------
+Nombre: Índice de Canibalización entre Canales
+
+Pregunta de Negocio: 
+"¿Está el crecimiento de un canal (ej: e-commerce) robando ventas 
+de otro canal (ej: retail tradicional) o expandiendo el mercado?"
+
+Cálculo:
+Cannibalization_Index = 
+  (Channel_A_Growth_Rate + Channel_B_Growth_Rate) /
+  (Total_Brand_Growth_Rate)
+
+Si > 1.0: Expansión de mercado (ambos crecen)
+Si = 1.0: Suma cero (uno crece, otro decrece proporcionalmente)
+Si < 1.0: Contracción (pérdida neta)
+
+FROM: gold_kpi_market_share
+SELECT: 
+  - monthly_sell_in_qty POR channel
+  - LAG() para crecimiento MoM
+GROUP BY: brand, year_month
+
+Impacto: 
+Entender si estrategia omnicanal está funcionando o causando conflictos
+
+=====================================================================
+
+INSIGHT 5: LOST SALES ROOT CAUSE ANALYSIS
+------------------------------------------
+Nombre: Análisis de Causa Raíz de Ventas Perdidas
+
+Pregunta de Negocio: 
+"¿Cuánto estoy perdiendo por stock-out vs pricing incorrecto vs 
+baja rotación?"
+
+Cálculo:
+Lost_Sales_by_Root_Cause:
+
+1. Stock_Out_Loss = 
+   pdv_with_stock_out × avg_daily_demand × avg_unit_price × days_out_of_stock
+   FROM: gold_fact_stock + gold_kpi_market_visibility_daily
+
+2. Price_Premium_Loss = 
+   (pdv_above_market × avg_demand) × 
+   (1 - (1 / (1 + Price_Elasticity × (Price_Index - 100)/100)))
+   FROM: gold_fact_price_audit + Elasticity calculado
+
+3. Slow_Moving_Loss = 
+   (closing_stock WHERE stock_days > 60) × holding_cost_rate × unit_price
+   FROM: gold_fact_stock
+
+Total_Recoverable_Revenue = SUM(1, 2, 3)
+
+Impacto: 
+Priorizar acciones (resolver stock-outs rinde más que ajustar precios?)
+
+=====================================================================
+
+INSIGHT 6: GEOGRAPHIC PENETRATION OPPORTUNITY SCORE
+----------------------------------------------------
+Nombre: Score de Oportunidad Geográfica
+
+Pregunta de Negocio: 
+"¿En qué regiones/ciudades tengo mayor potencial de crecimiento 
+no explotado?"
+
+Cálculo:
+Geographic_Opportunity_Score = 
+  (Total_PDVs_in_Region - Active_PDVs_with_Product) × 
+  Avg_Sales_Per_PDV_in_Region × 
+  Region_Market_Share_Gap
+
+Donde:
+- Total_PDVs_in_Region: FROM gold_dim_pdv (GROUP BY region)
+- Active_PDVs_with_Product: FROM gold_fact_sell_in (COUNT DISTINCT pdv_sk BY region)
+- Avg_Sales_Per_PDV: FROM gold_kpi_market_visibility_daily
+- Market_Share_Gap: FROM gold_kpi_market_share (portfolio_share vs target)
+
+GROUP BY: region, brand, category
+ORDER BY: Opportunity_Score DESC
+
+Impacto: 
+Guiar expansión geográfica y asignación de recursos de ventas
+
+=====================================================================
+
+INSIGHT 7: PRICE WAR ALERT INDEX
+---------------------------------
+Nombre: Índice de Alerta de Guerra de Precios
+
+Pregunta de Negocio: 
+"¿Hay una guerra de precios en curso? ¿Cuándo y dónde empezó?"
+
+Cálculo:
+Price_War_Index = 
+  (Price_Volatility_30d × 0.4) +
+  (Price_Drop_Velocity × 0.3) +
+  (Market_Price_Dispersion × 0.3)
+
+Donde:
+Price_Volatility_30d = STDDEV(price_index) OVER (PARTITION BY product_sk ORDER BY date_sk ROWS BETWEEN 29 PRECEDING AND CURRENT ROW)
+
+Price_Drop_Velocity = 
+  (Current_Price - Price_30_days_ago) / Price_30_days_ago / 30 × 100
+
+Market_Price_Dispersion = 
+  (MAX(observed_price) - MIN(observed_price)) / AVG(observed_price) × 100
+
+FROM: gold_fact_price_audit
+GROUP BY: product_sk, category, date_sk
+HAVING: Price_War_Index > 50 (threshold)
+
+Impacto: 
+Detectar temprano competencia agresiva y responder estratégicamente
+
+=====================================================================
+
+INSIGHT 8: PRODUCT LIFECYCLE STAGE CLASSIFIER
+----------------------------------------------
+Nombre: Clasificador de Etapa de Ciclo de Vida
+
+Pregunta de Negocio: 
+"¿Qué productos están en introducción, crecimiento, madurez o declive?"
+
+Cálculo:
+Lifecycle_Stage = 
+  CASE
+    WHEN (MoM_Growth > 20% AND PDV_Penetration < 30%) THEN 'INTRODUCTION'
+    WHEN (MoM_Growth > 10% AND PDV_Penetration BETWEEN 30 AND 70%) THEN 'GROWTH'
+    WHEN (MoM_Growth BETWEEN -5% AND 5% AND PDV_Penetration > 70%) THEN 'MATURITY'
+    WHEN (MoM_Growth < -5%) THEN 'DECLINE'
+  END
+
+MoM_Growth = 
+  (Current_Month_Qty - Previous_Month_Qty) / Previous_Month_Qty × 100
+
+PDV_Penetration = 
+  COUNT(DISTINCT pdv_sk with product) / 
+  COUNT(DISTINCT pdv_sk total) × 100
+
+FROM: gold_kpi_market_share + gold_fact_sell_in
+GROUP BY: product_sk, year_month
+
+Impacto: 
+Ajustar inversión en marketing/trade por producto (no invertir igual 
+en todos)
+
+=====================================================================
+
+INSIGHT 9: CHANNEL PROFITABILITY INDEX (ESTIMATED)
+---------------------------------------------------
+Nombre: Índice de Rentabilidad por Canal
+
+Pregunta de Negocio: 
+"¿Qué canales generan más valor neto después de considerar costos 
+operativos?"
+
+Cálculo:
+Channel_Profitability_Index = 
+  (Total_Revenue × Gross_Margin) - 
+  (Lost_Sales + Stock_Holding_Cost + Price_Discount_Cost) /
+  Total_Revenue × 100
+
+Donde:
+- Total_Revenue: FROM gold_fact_sell_in (SUM value_sell_in)
+- Lost_Sales: FROM gold_kpi_market_visibility_daily (lost_sales_value_estimated)
+- Stock_Holding_Cost: FROM gold_fact_stock (closing_stock × holding_rate)
+- Price_Discount_Cost: FROM gold_fact_price_audit (below_market_value_lost)
+
+GROUP BY: channel, brand, year_month
+
+Impacto: 
+Identificar canales con alto volumen pero baja rentabilidad real
+
+=====================================================================
+
+INSIGHT 10: PREDICTIVE STOCK-OUT RISK SCORE
+--------------------------------------------
+Nombre: Score Predictivo de Riesgo de Quiebre
+
+Pregunta de Negocio: 
+"¿Qué productos tendrán stock-out en los próximos 7 días si no hay 
+reposición?"
+
+Cálculo:
+Stock_Out_Risk_Score = 
+  CASE
+    WHEN (stock_days < 7 AND sell_through_acceleration > 1.2) THEN 'HIGH'
+    WHEN (stock_days < 14 AND sell_through_rate > avg) THEN 'MEDIUM'
+    WHEN (stock_days >= 14) THEN 'LOW'
+  END
+
+sell_through_acceleration = 
+  avg_daily_sell_out_last_7_days / 
+  avg_daily_sell_out_last_30_days
+
+Days_Until_Stock_Out_Predicted = 
+  closing_stock / 
+  (avg_daily_sell_out_last_7_days × sell_through_acceleration)
+
+FROM: gold_fact_stock + gold_fact_sell_in
+GROUP BY: product_sk, pdv_sk, date_sk
+
+Impacto: 
+Alertas proactivas para reponer antes del quiebre (no reactivas)
+
+=====================================================================
+
+🎖️ TOP 3 INSIGHTS CON MAYOR IMPACTO INMEDIATO
+
+1. PERFECT STORE SCORE → Priorización operativa clara
+2. LOST SALES ROOT CAUSE ANALYSIS → Cuantificar recuperación de revenue
+3. PREDICTIVE STOCK-OUT RISK → Prevenir vs reaccionar
+
+=====================================================================
+
+📊 IMPLEMENTACIÓN SUGERIDA
+
+Todos estos insights se pueden calcular usando:
+- Tablas Gold existentes (fact_sell_in, fact_price_audit, fact_stock)
+- KPIs actuales (market_visibility_daily, market_share)
+- Funciones Window de Spark SQL (LAG, LEAD, STDDEV, etc.)
+- Sin necesidad de datos externos (todo viene de las capas Silver/Gold)
+
+=====================================================================
+
+VENTAJAS CLAVE:
+✓ Implementables con infraestructura actual
+✓ No requieren nuevas fuentes de datos
+✓ Aprovechan arquitectura Medallion existente
+✓ Calculables en capa Gold con Spark SQL
+✓ Listos para consumo en Power BI / Streamlit
+
+=====================================================================
+FIN DEL DOCUMENTO
+=====================================================================

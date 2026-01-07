@@ -509,7 +509,175 @@ This document provides detailed information about all data entities, attributes,
 
 ---
 
-## Key Performance Indicators (KPIs)
+
+## Gold Layer Advanced KPI Tables (Denormalized)
+
+### gold_kpi_price_elasticity
+| Column Name        | Data Type | Description                                 | Business Logic                                 | Nullable | Example   |
+|--------------------|-----------|---------------------------------------------|------------------------------------------------|----------|-----------|
+| channel            | string    | Sales channel                               | Grain                                          | No       | MODERN TRADE |
+| brand              | string    | Product brand                               | Grain                                          | No       | NESCAFE   |
+| year_month         | string    | Year and month (YYYY-MM)                    | Partition                                      | No       | 2026-01   |
+| price_elasticity   | double    | Price elasticity of demand                  | ((qty - prev_qty)/prev_qty) / ((price - prev_price)/prev_price) | Yes      | -1.25     |
+| processing_timestamp | timestamp | ETL timestamp                              | System                                         | No       | 2026-01-06 08:00:00 |
+
+**Table Purpose:** Measures the sensitivity of sales to price changes by channel and brand, supporting pricing and promotion optimization.
+
+**Grain:** channel × brand × year_month
+
+**Partition:** year_month
+
+---
+
+### gold_kpi_perfect_store_score
+| Column Name           | Data Type | Description                                 | Business Logic                                 | Nullable | Example   |
+|-----------------------|-----------|---------------------------------------------|------------------------------------------------|----------|-----------|
+| pdv_sk                | string    | Point of sale surrogate key                 | Grain                                          | No       | f6e5d4c3b2a19087 |
+| date_sk               | integer   | Date surrogate key                          | Partition                                      | No       | 20260106  |
+| perfect_store_score   | double    | Composite store execution score (0-100)     | Weighted sum of availability, price, stock, velocity | Yes      | 87.5      |
+| processing_timestamp  | timestamp | ETL timestamp                               | System                                         | No       | 2026-01-06 08:00:00 |
+
+**Table Purpose:** Composite index of operational excellence at the point of sale, used for prioritizing field actions.
+
+**Grain:** pdv_sk × date_sk
+
+**Partition:** date_sk
+
+---
+
+### gold_kpi_stock_out_pattern
+| Column Name                | Data Type | Description                                 | Business Logic                                 | Nullable | Example   |
+|----------------------------|-----------|---------------------------------------------|------------------------------------------------|----------|-----------|
+| product_sk                 | string    | Product surrogate key                       | Grain                                          | No       | a1b2c3d4e5f67890 |
+| pdv_sk                     | string    | Point of sale surrogate key                 | Grain                                          | No       | f6e5d4c3b2a19087 |
+| stock_out_frequency        | double    | Frequency of stock-outs                     | Distinct stock-out days / total days           | Yes      | 0.12      |
+| stock_out_clustering_index | string    | Pattern of stock-outs                       | CHRONIC/FREQUENT/OCCASIONAL/HEALTHY            | Yes      | FREQUENT  |
+| processing_timestamp       | timestamp | ETL timestamp                               | System                                         | No       | 2026-01-06 08:00:00 |
+
+**Table Purpose:** Identifies frequency and pattern of stock-outs by product and store, supporting root cause analysis.
+
+**Grain:** product_sk × pdv_sk
+
+---
+
+### gold_kpi_channel_cannibalization
+| Column Name             | Data Type | Description                                 | Business Logic                                 | Nullable | Example   |
+|-------------------------|-----------|---------------------------------------------|------------------------------------------------|----------|-----------|
+| brand                   | string    | Product brand                               | Grain                                          | No       | NESCAFE   |
+| year_month              | string    | Year and month (YYYY-MM)                    | Partition                                      | No       | 2026-01   |
+| cannibalization_index   | double    | Channel cannibalization index                | Sum(channel_growth_rate) / total_brand_growth_rate | Yes      | 0.85      |
+| processing_timestamp    | timestamp | ETL timestamp                               | System                                         | No       | 2026-01-06 08:00:00 |
+
+**Table Purpose:** Measures whether channel growth is at the expense of other channels or expands the market.
+
+**Grain:** brand × year_month
+
+**Partition:** year_month
+
+---
+
+### gold_kpi_lost_sales_root_cause
+| Column Name                | Data Type | Description                                 | Business Logic                                 | Nullable | Example   |
+|----------------------------|-----------|---------------------------------------------|------------------------------------------------|----------|-----------|
+| pdv_sk                     | string    | Point of sale surrogate key                 | Grain                                          | No       | f6e5d4c3b2a19087 |
+| product_sk                 | string    | Product surrogate key                       | Grain                                          | No       | a1b2c3d4e5f67890 |
+| date_sk                    | integer   | Date surrogate key                          | Partition                                      | No       | 20260106  |
+| stock_out_loss             | double    | Lost sales due to stock-out                 | Calculated from stock-out days × demand × price | Yes      | 1200.00   |
+| price_premium_loss         | double    | Lost sales due to price premium             | Calculated from price elasticity and price index | Yes      | 350.00    |
+| slow_moving_loss           | double    | Lost sales due to slow-moving inventory      | Calculated from holding cost and excess stock   | Yes      | 100.00    |
+| total_recoverable_revenue  | double    | Total recoverable revenue                   | Sum of all root causes                         | Yes      | 1650.00   |
+| processing_timestamp       | timestamp | ETL timestamp                               | System                                         | No       | 2026-01-06 08:00:00 |
+
+**Table Purpose:** Quantifies lost sales by root cause, supporting targeted revenue recovery actions.
+
+**Grain:** pdv_sk × product_sk × date_sk
+
+**Partition:** date_sk
+
+---
+
+### gold_kpi_geographic_opportunity_score
+| Column Name                  | Data Type | Description                                 | Business Logic                                 | Nullable | Example   |
+|------------------------------|-----------|---------------------------------------------|------------------------------------------------|----------|-----------|
+| region                       | string    | Geographic region                           | Grain                                          | No       | NORTH     |
+| brand                        | string    | Product brand                               | Grain                                          | No       | NESCAFE   |
+| category                     | string    | Product category                            | Grain                                          | No       | HOT DRINKS|
+| geographic_opportunity_score | double    | Geographic opportunity score                | (total_pdvs - active_pdvs) × avg_sales × share_gap | Yes      | 25000.00  |
+| processing_timestamp         | timestamp | ETL timestamp                               | System                                         | No       | 2026-01-06 08:00:00 |
+
+**Table Purpose:** Detects regions with the highest untapped growth potential for sales expansion.
+
+**Grain:** region × brand × category
+
+---
+
+### gold_kpi_price_war_alert
+| Column Name           | Data Type | Description                                 | Business Logic                                 | Nullable | Example   |
+|-----------------------|-----------|---------------------------------------------|------------------------------------------------|----------|-----------|
+| product_sk            | string    | Product surrogate key                       | Grain                                          | No       | a1b2c3d4e5f67890 |
+| category              | string    | Product category                            | Grain                                          | No       | HOT DRINKS|
+| date_sk               | integer   | Date surrogate key                          | Partition                                      | No       | 20260106  |
+| price_war_index       | double    | Price war alert index                       | Weighted sum of volatility, drop, dispersion    | Yes      | 2.15      |
+| processing_timestamp  | timestamp | ETL timestamp                               | System                                         | No       | 2026-01-06 08:00:00 |
+
+**Table Purpose:** Alerts on potential price wars using a composite index of price volatility, drop velocity, and market dispersion.
+
+**Grain:** product_sk × category × date_sk
+
+**Partition:** date_sk
+
+---
+
+### gold_kpi_product_lifecycle_stage
+| Column Name         | Data Type | Description                                 | Business Logic                                 | Nullable | Example   |
+|---------------------|-----------|---------------------------------------------|------------------------------------------------|----------|-----------|
+| product_sk          | string    | Product surrogate key                       | Grain                                          | No       | a1b2c3d4e5f67890 |
+| year_month          | string    | Year and month (YYYY-MM)                    | Partition                                      | No       | 2026-01   |
+| lifecycle_stage     | string    | Product lifecycle stage                     | INTRODUCTION/GROWTH/MATURITY/DECLINE/UNDEFINED | Yes      | GROWTH    |
+| processing_timestamp| timestamp | ETL timestamp                               | System                                         | No       | 2026-01-06 08:00:00 |
+
+**Table Purpose:** Classifies products by lifecycle stage to inform marketing and trade investment strategies.
+
+**Grain:** product_sk × year_month
+
+**Partition:** year_month
+
+---
+
+### gold_kpi_channel_profitability_index
+| Column Name                  | Data Type | Description                                 | Business Logic                                 | Nullable | Example   |
+|------------------------------|-----------|---------------------------------------------|------------------------------------------------|----------|-----------|
+| channel                      | string    | Sales channel                               | Grain                                          | No       | MODERN TRADE |
+| brand                        | string    | Product brand                               | Grain                                          | No       | NESCAFE   |
+| year_month                   | string    | Year and month (YYYY-MM)                    | Partition                                      | No       | 2026-01   |
+| channel_profitability_index  | double    | Channel profitability index (estimated)      | (revenue × margin - losses) / revenue × 100    | Yes      | 12.5      |
+| processing_timestamp         | timestamp | ETL timestamp                               | System                                         | No       | 2026-01-06 08:00:00 |
+
+**Table Purpose:** Estimates net profitability by channel, considering revenue, margin, and key costs.
+
+**Grain:** channel × brand × year_month
+
+**Partition:** year_month
+
+---
+
+### gold_kpi_predictive_stock_out_risk
+| Column Name                  | Data Type | Description                                 | Business Logic                                 | Nullable | Example   |
+|------------------------------|-----------|---------------------------------------------|------------------------------------------------|----------|-----------|
+| product_sk                   | string    | Product surrogate key                       | Grain                                          | No       | a1b2c3d4e5f67890 |
+| pdv_sk                       | string    | Point of sale surrogate key                 | Grain                                          | No       | f6e5d4c3b2a19087 |
+| date_sk                      | integer   | Date surrogate key                          | Partition                                      | No       | 20260106  |
+| stock_out_risk_score         | string    | Predicted stock-out risk (HIGH/MEDIUM/LOW)  | Based on stock days and sell-through acceleration | Yes      | HIGH      |
+| days_until_stock_out_predicted | double  | Predicted days until stock-out              | closing_stock / (avg_daily_sell_out × acceleration) | Yes      | 2.5       |
+| processing_timestamp         | timestamp | ETL timestamp                               | System                                         | No       | 2026-01-06 08:00:00 |
+
+**Table Purpose:** Predicts risk and timing of stock-outs for proactive replenishment and loss prevention.
+
+**Grain:** product_sk × pdv_sk × date_sk
+
+**Partition:** date_sk
+
+---
 
 ### KPI 1: Availability Rate
 
