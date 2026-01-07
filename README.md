@@ -3,8 +3,34 @@
 [![Databricks](https://img.shields.io/badge/Databricks-Serverless-FF3621?style=flat-square&logo=databricks)](https://databricks.com/)
 [![Delta Lake](https://img.shields.io/badge/Delta_Lake-3.x-004687?style=flat-square)](https://delta.io/)
 [![Power BI](https://img.shields.io/badge/Power_BI-DirectQuery-F2C811?style=flat-square&logo=powerbi)](https://powerbi.microsoft.com/)
+[![Unity Catalog](https://img.shields.io/badge/Unity_Catalog-Governance-25A162?style=flat-square)](https://docs.databricks.com/en/data-governance/unity-catalog/index.html)
+[![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python)](https://python.org/)
 
 **Enterprise Analytics Platform for Market Visibility in FMCG/Retail**
+
+---
+
+## Tech Stack
+
+| Layer | Technology | Components Used |
+|-------|------------|-----------------|
+| **Compute** | Databricks Serverless | PySpark DataFrame API, Spark SQL, Notebooks, Workflows |
+| **Storage** | Delta Lake 3.x | ACID transactions, schema evolution, time travel, MERGE operations |
+| **Governance** | Unity Catalog | Three-level namespace, lineage tracking, access control |
+| **Orchestration** | Databricks Workflows | DAG-based pipelines, YAML configuration, Databricks Asset Bundles |
+| **Consumption** | Power BI | DirectQuery, DAX measures, optimized Star Schema |
+| **Quality** | Delta History | Zero-compute validation, schema drift detection |
+| **Language** | Python 3.11 | PySpark, pandas (Excel ingestion), openpyxl |
+
+### Key Technical Patterns
+
+| Pattern | Implementation |
+|---------|----------------|
+| **SCD Type 2** | SHA-256 surrogate keys, `valid_from`/`valid_to` tracking |
+| **Medallion Architecture** | Bronze (raw) → Silver (standardized) → Gold (dimensional) |
+| **Single-Write Pattern** | One write per table per run (Serverless optimization) |
+| **Pre-Aggregation** | Business KPIs calculated at ETL, not query time |
+| **Quality Flags** | Transparency over imputation (`is_valid`, `is_complete`) |
 
 ---
 
