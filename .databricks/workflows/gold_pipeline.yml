@@ -1,21 +1,10 @@
 # =============================================================================
-# GOLD LAYER PIPELINE - SIMPLIFIED ORCHESTRATOR PATTERN
+# GOLD LAYER PIPELINE - ORCHESTRATOR YAML
 # =============================================================================
-# 
-# Purpose: Star Schema ETL for analytical consumption
+# Purpose: Run Gold Layer dimensions (Date, Product, PDV) sequentially
 # Author: Diego Mayorga
-# Date: 2026-01-06
-# Compute: Serverless (workspace requirement)
-# 
-# Strategy: Single task calls the orchestrator notebook which handles
-#           all phases internally (dimensions → facts → kpis → validation)
-#
-# Trade-off Decision:
-#   - Alternative A: YAML with 9 separate tasks (redundant with orchestrator)
-#   - Alternative B: Single task calling orchestrator (CHOSEN)
-#   - Gain: Centralized maintenance, widgets support, custom error handling
-#   - Sacrifice: Native Databricks parallel execution (mitigated by orchestrator)
-#
+# Date: 2026-01-07
+# Compute: Serverless / Existing Cluster
 # =============================================================================
 
 resources:
@@ -23,14 +12,12 @@ resources:
     gold_layer_pipeline:
       name: "Gold Layer - Dimensional Model"
       description: |
-        Gold Layer pipeline via orchestrator notebook:
-        - Phase 1: Dimensions (Date, Product, PDV) with SCD Type 2
-        - Phase 2: Facts (Sell-In, Price Audit, Stock)
-        - Phase 3: KPIs (Market Visibility, Market Share)
-        - Phase 4: Validation (Zero-compute Delta metadata)
+        Gold Layer pipeline executing dimension notebooks sequentially:
+        1. gold_dim_date
+        2. gold_dim_product
+        3. gold_dim_pdv
         
-        The orchestrator handles sequencing, error handling, and metrics.
-        Supports widgets: run_pipeline, stop_on_error, run_validation
+        Each notebook handles its own SCD2 logic (or static table) and validation.
       
       tags:
         project: "BI_Market_Visibility"
@@ -38,9 +25,6 @@ resources:
         pattern: "orchestrator"
         owner: "diego.mayorgacapera@gmail.com"
       
-      # ─────────────────────────────────────────────────────────────────────
-      # NOTIFICATIONS
-      # ─────────────────────────────────────────────────────────────────────
       email_notifications:
         on_failure:
           - "diego.mayorgacapera@gmail.com"
@@ -48,55 +32,35 @@ resources:
           - "diego.mayorgacapera@gmail.com"
         no_alert_for_skipped_runs: true
       
-      # ─────────────────────────────────────────────────────────────────────
-      # TIMEOUT POLICY
-      # ─────────────────────────────────────────────────────────────────────
-      timeout_seconds: 7200
-      
-      # ─────────────────────────────────────────────────────────────────────
-      # SCHEDULE: Daily at 6 AM (after Silver completes)
-      # ─────────────────────────────────────────────────────────────────────
+      timeout_seconds: 10800  # 3h max for full run
+
       schedule:
-        quartz_cron_expression: "0 0 6 * * ?"
+        quartz_cron_expression: "0 0 6 * * ?"  # Daily 6 AM
         timezone_id: "America/Bogota"
         pause_status: "PAUSED"
-      
-      # ═══════════════════════════════════════════════════════════════════════
-      # SINGLE TASK - Orchestrator handles all phases internally
-      # ═══════════════════════════════════════════════════════════════════════
-      #
-      # Internal Execution Flow (managed by orchestrator):
-      #
-      #   ┌──────────┐  ┌─────────────┐  ┌──────────┐
-      #   │ dim_date │  │ dim_product │  │ dim_pdv  │   ← Phase 1
-      #   └────┬─────┘  └──────┬──────┘  └────┬─────┘
-      #        └───────────────┼──────────────┘
-      #                        ▼
-      #   ┌─────────────┐  ┌──────────────┐  ┌────────────┐
-      #   │fact_sell_in │  │fact_price_aud│  │ fact_stock │  ← Phase 2
-      #   └──────┬──────┘  └──────┬───────┘  └─────┬──────┘
-      #          └────────────────┼────────────────┘
-      #                           ▼
-      #   ┌──────────────────┐  ┌──────────────────┐
-      #   │kpi_mkt_visibility│  │ kpi_market_share │  ← Phase 3
-      #   └────────┬─────────┘  └────────┬─────────┘
-      #            └─────────────────────┘
-      #                        ▼
-      #              ┌──────────────────┐
-      #              │   validation     │  ← Phase 4
-      #              └──────────────────┘
-      #
-      # ═══════════════════════════════════════════════════════════════════════
-      
+
       tasks:
-        - task_key: "gold_orchestrator"
-          description: "Execute complete Gold Layer pipeline via orchestrator"
+        - task_key: "gold_dim_date"
+          description: "Generate Gold Date dimension"
           notebook_task:
-            notebook_path: "/Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/notebooks/gold/03_gold_orchestrator"
+            notebook_path: "/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/notebooks/gold/dimensions/gold_dim_date"
             source: "WORKSPACE"
-            base_parameters:
-              run_pipeline: "yes"
-              stop_on_error: "yes"
-              run_validation: "yes"
-              timeout_seconds: "6000"
-          timeout_seconds: 7200
+          timeout_seconds: 3600
+
+        - task_key: "gold_dim_product"
+          description: "Generate Gold Product dimension (SCD Type 2)"
+          depends_on:
+            - task_key: "gold_dim_date"
+          notebook_task:
+            notebook_path: "/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/notebooks/gold/dimensions/gold_dim_product"
+            source: "WORKSPACE"
+          timeout_seconds: 3600
+
+        - task_key: "gold_dim_pdv"
+          description: "Generate Gold PDV dimension (SCD Type 2)"
+          depends_on:
+            - task_key: "gold_dim_product"
+          notebook_task:
+            notebook_path: "/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/notebooks/gold/dimensions/gold_dim_pdv"
+            source: "WORKSPACE"
+          timeout_seconds: 3600
