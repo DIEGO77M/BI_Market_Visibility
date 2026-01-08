@@ -235,7 +235,7 @@ def get_previous_schema_from_delta_history(table_name, catalog, schema, current_
     full_table_name = f"{catalog}.{schema}.{table_name}"
     
     try:
-        # Optimización: solo lee las últimas N versiones relevantes
+        # Optimization: only read the last N relevant versions
         history = (
             spark.sql(f"DESCRIBE HISTORY {full_table_name}")
             .orderBy(col("version").desc())
@@ -248,7 +248,7 @@ def get_previous_schema_from_delta_history(table_name, catalog, schema, current_
         prev = sorted(prev_versions, key=lambda x: x.version, reverse=True)[0]
         prev_version = prev.version
         operation_params = prev.operationParameters
-        # Intenta extraer el schema del operationParameters
+        # Try to extract the schema from operationParameters
         if operation_params and 'schemaString' in operation_params:
             schema_json = json.loads(operation_params['schemaString'])
             business_columns = sorted([
@@ -264,7 +264,7 @@ def get_previous_schema_from_delta_history(table_name, catalog, schema, current_
                 "columns": business_columns
             }
         else:
-            # Fallback: lee el schema de la versión anterior (costoso)
+            # Fallback: read the schema from the previous version (expensive)
             temp_df = spark.read.format("delta").option("versionAsOf", prev_version).table(full_table_name)
             business_columns = sorted([
                 c for c in temp_df.columns 
@@ -279,8 +279,8 @@ def get_previous_schema_from_delta_history(table_name, catalog, schema, current_
                 "columns": business_columns
             }
     except Exception as e:
-        # Loguea como incidente de observabilidad y propaga el error
-        print(f"🛑 INCIDENTE: Error crítico extrayendo schema previo para {table_name}: {str(e)}")
+        # Log as observability incident and propagate the error
+        print(f"🛑 INCIDENT: Critical error extracting previous schema for {table_name}: {str(e)}")
         raise
 
 # COMMAND ----------
@@ -520,7 +520,29 @@ else:
     print(f"✅ Tables Analyzed: {len(BRONZE_TABLES)}")
     print(f"🔔 Drift Detected: {drift_detected_count} table(s)")
     print(f"📝 Alerts Generated: {alerts_generated}")
+
     print(f"⏰ Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    # --- Monitoring Summary Writeback for n8n integration ---
+    SUMMARY_TABLE = f"{CATALOG}.{SCHEMA}.bronze_monitoring_summary"
+
+    # Write summary record (let DataFrame define schema)
+    import uuid
+    summary_record = {
+        "run_id": str(uuid.uuid4()),
+        "execution_time": datetime.now(),
+        "analyzed_tables": int(len(BRONZE_TABLES)),
+        "detected_drifts": int(drift_detected_count),
+        "generated_alerts": int(alerts_generated),
+        "run_status": "SUCCESS" if not ('run_failed' in locals() and run_failed) else "FAILED"
+    }
+
+    spark.createDataFrame([summary_record]).write \
+        .format("delta") \
+        .mode("append") \
+        .saveAsTable(SUMMARY_TABLE)
+
+    print(f"✅ Monitoring summary written to {SUMMARY_TABLE}")
     print("=" * 80)
 
 # COMMAND ----------
