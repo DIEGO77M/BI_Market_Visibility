@@ -63,12 +63,13 @@
 # MAGIC | `bronze_master_pdv` | PDV_Code, PDV_Name | NEW columns = LOW, REMOVED columns = MEDIUM |
 # MAGIC | `bronze_master_products` | Product_SKU, Product_Name | NEW columns = LOW, REMOVED columns = MEDIUM |
 # MAGIC 
-# MAGIC ### Severity Classification
+# MAGIC ### Severity Classification & Business Impact
 # MAGIC 
-# MAGIC - **HIGH 🚨:** Critical column removed (breaks Silver transformations)
-# MAGIC - **MEDIUM ⚠️:** Non-critical column removed (potential data loss)
-# MAGIC - **LOW ℹ️:** New columns added (schema extension, no breakage)
+# MAGIC - **HIGH 🚨:** Removal of a critical column (e.g., business key, date, or measure) that breaks Silver/Gold transformations or blocks downstream analytics. n8n triggers immediate escalation to DataOps and business owners, with full traceability and SLA.
+# MAGIC - **MEDIUM ⚠️:** Removal of a non-critical column (e.g., descriptive attribute) that may cause partial data loss or impact reporting. n8n creates a review task for data stewards and notifies domain owners for impact assessment.
+# MAGIC - **LOW ℹ️:** Addition of new columns (schema extension, no breakage). n8n logs the event, updates the data dictionary, and notifies analytics teams for awareness and documentation.
 # MAGIC 
+# MAGIC All alerts are timestamped, auditable, and linked to the specific Bronze batch and schema version, ensuring business-aligned traceability and compliance.
 # MAGIC ---
 # MAGIC 
 # MAGIC ## Execution Schedule
@@ -234,23 +235,21 @@ def get_previous_schema_from_delta_history(table_name, catalog, schema, current_
     full_table_name = f"{catalog}.{schema}.{table_name}"
     
     try:
-        # Get previous version from history
-        history = spark.sql(f"""
-            DESCRIBE HISTORY {full_table_name} 
-            WHERE version < {current_version}
-            ORDER BY version DESC
-            LIMIT 1
-        """).collect()
-        
-        if not history:
-            print(f"   ℹ️  No previous version found for {table_name} (likely first run)")
-            return None
-        
-        prev_version = history[0].version
-        operation_params = history[0].operationParameters
-        # Try to extract schema from operationParameters (metadata-only)
+        # Optimización: solo lee las últimas N versiones relevantes
+        history = (
+            spark.sql(f"DESCRIBE HISTORY {full_table_name}")
+            .orderBy(col("version").desc())
+            .limit(LOOKBACK_VERSIONS + 1)
+            .collect()
+        )
+        prev_versions = [h for h in history if h.version < current_version]
+        if not prev_versions:
+            raise Exception(f"No previous version found for {table_name} (likely first run)")
+        prev = sorted(prev_versions, key=lambda x: x.version, reverse=True)[0]
+        prev_version = prev.version
+        operation_params = prev.operationParameters
+        # Intenta extraer el schema del operationParameters
         if operation_params and 'schemaString' in operation_params:
-            import json
             schema_json = json.loads(operation_params['schemaString'])
             business_columns = sorted([
                 field['name'] for field in schema_json['fields']
@@ -260,12 +259,12 @@ def get_previous_schema_from_delta_history(table_name, catalog, schema, current_
             return {
                 "table_name": table_name,
                 "version": prev_version,
-                "timestamp": history[0].timestamp,
+                "timestamp": prev.timestamp,
                 "column_count": len(business_columns),
                 "columns": business_columns
             }
         else:
-            # Fallback: restore table to previous version (expensive)
+            # Fallback: lee el schema de la versión anterior (costoso)
             temp_df = spark.read.format("delta").option("versionAsOf", prev_version).table(full_table_name)
             business_columns = sorted([
                 c for c in temp_df.columns 
@@ -275,13 +274,14 @@ def get_previous_schema_from_delta_history(table_name, catalog, schema, current_
             return {
                 "table_name": table_name,
                 "version": prev_version,
-                "timestamp": history[0].timestamp,
+                "timestamp": prev.timestamp,
                 "column_count": len(business_columns),
                 "columns": business_columns
             }
     except Exception as e:
-        print(f"   ⚠️  Error extracting previous schema for {table_name}: {str(e)}")
-        return None
+        # Loguea como incidente de observabilidad y propaga el error
+        print(f"🛑 INCIDENTE: Error crítico extrayendo schema previo para {table_name}: {str(e)}")
+        raise
 
 # COMMAND ----------
 
@@ -460,10 +460,14 @@ for table_name in BRONZE_TABLES:
     print(f"   📋 Current Columns: {current_schema['column_count']} business columns")
     
     # Step 2: Get previous schema
-    previous_schema = get_previous_schema_from_delta_history(
-        table_name, CATALOG, SCHEMA, current_schema['version']
-    )
-    
+    try:
+        previous_schema = get_previous_schema_from_delta_history(
+            table_name, CATALOG, SCHEMA, current_schema['version']
+        )
+    except Exception as e:
+        print(f"🛑 RUN FAILED: No se pudo extraer el schema previo para {table_name}. Abortando monitoreo.")
+        run_failed = True
+        break
     if not previous_schema:
         print(f"   ℹ️  No drift detection (first run or no previous version)")
         continue
@@ -504,14 +508,20 @@ for table_name in BRONZE_TABLES:
     write_alert(alert_record, ALERT_TABLE)
     alerts_generated += 1
 
-print("\n" + "=" * 80)
-print("📊 MONITORING SUMMARY")
-print("=" * 80)
-print(f"✅ Tables Analyzed: {len(BRONZE_TABLES)}")
-print(f"🔔 Drift Detected: {drift_detected_count} table(s)")
-print(f"📝 Alerts Generated: {alerts_generated}")
-print(f"⏰ Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-print("=" * 80)
+
+if 'run_failed' in locals() and run_failed:
+    print("\n" + "=" * 80)
+    print("🛑 MONITOREO FALLIDO: Error crítico en extracción de schema previo. Revisar logs de incidentes.")
+    print("=" * 80)
+else:
+    print("\n" + "=" * 80)
+    print("📊 MONITORING SUMMARY")
+    print("=" * 80)
+    print(f"✅ Tables Analyzed: {len(BRONZE_TABLES)}")
+    print(f"🔔 Drift Detected: {drift_detected_count} table(s)")
+    print(f"📝 Alerts Generated: {alerts_generated}")
+    print(f"⏰ Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 80)
 
 # COMMAND ----------
 
@@ -612,31 +622,32 @@ ORDER BY stability_score ASC, total_alerts DESC
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 8. Future Enhancements
+# MAGIC ## 8. Future Enhancements & Alert Orchestration
 # MAGIC 
-# MAGIC ### Phase 2: Notifications
+# MAGIC ### Phase 2: Business-Aligned Alerting via n8n
 # MAGIC 
-# MAGIC ```python
-# MAGIC # Slack Integration
-# MAGIC if severity == "HIGH":
-# MAGIC     webhook_url = dbutils.secrets.get("monitoring", "slack_webhook")
-# MAGIC     requests.post(webhook_url, json={
-# MAGIC         "text": f"🚨 Critical schema drift in {table_name}",
-# MAGIC         "attachments": [{
-# MAGIC             "color": "danger",
-# MAGIC             "fields": [
-# MAGIC                 {"title": "Table", "value": table_name, "short": True},
-# MAGIC                 {"title": "Removed Columns", "value": str(removed_columns), "short": True}
-# MAGIC             ]
-# MAGIC         }]
-# MAGIC     })
-# MAGIC ```
+# MAGIC **Alert Orchestration:**
+# MAGIC - All schema drift alerts (LOW, MEDIUM, HIGH) will be published to a central event stream consumed by n8n.
+# MAGIC - n8n will orchestrate downstream actions: email notifications, Slack/Teams alerts, ticket creation, and escalation workflows.
+# MAGIC - Alert payloads will include: table, impacted columns, severity, business impact, detected timestamp, and recommended action.
+# MAGIC 
+# MAGIC **Business Alignment:**
+# MAGIC - Alerts are classified by business risk:
+# MAGIC   - **HIGH:** Critical data loss or schema breakage that blocks Silver/Gold processing. n8n triggers immediate escalation to DataOps and business owners.
+# MAGIC   - **MEDIUM:** Non-critical but impactful changes (e.g., loss of non-key attributes). n8n creates a review task and notifies data stewards for impact assessment.
+# MAGIC   - **LOW:** Non-breaking changes (e.g., new columns). n8n logs the event, updates the data dictionary, and notifies analytics teams for awareness.
+# MAGIC - All alert events are auditable, timestamped, and linked to the specific Bronze batch and schema version, ensuring full traceability for compliance and root-cause analysis.
+# MAGIC 
+# MAGIC **Traceability & Governance:**
+# MAGIC - Each alert contains execution metadata, Delta version, and business context (table, domain, criticality).
+# MAGIC - The alert history enables reconstruction of schema evolution and justification of decisions for audit or stakeholders.
+# MAGIC - n8n centralizes incident management, ensuring no relevant change goes unnoticed and that corrective actions are traceable and measurable.
 # MAGIC 
 # MAGIC ### Phase 3: Auto-Remediation
 # MAGIC 
-# MAGIC - For LOW severity (new columns): Auto-update data dictionary
-# MAGIC - For MEDIUM severity: Create Jira ticket for review
-# MAGIC - For HIGH severity: Page on-call engineer
+# MAGIC - For LOW severity (new columns): n8n can trigger automated flows to update the data dictionary and notify BI teams.
+# MAGIC - For MEDIUM severity: n8n creates review and follow-up tasks for data stewards and domain owners.
+# MAGIC - For HIGH severity: n8n escalates the incident to DataOps, business, and support, with SLA and follow-up until resolution.
 # MAGIC 
 # MAGIC ### Phase 4: ML-Based Anomaly Detection
 # MAGIC 
