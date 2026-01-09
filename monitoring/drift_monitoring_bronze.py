@@ -119,8 +119,25 @@ CRITICAL_COLUMNS = {
 # Alert table
 ALERT_TABLE = f"{CATALOG}.{SCHEMA}.bronze_schema_alerts"
 
-# Lookback period for drift detection (compare current vs previous version)
-LOOKBACK_VERSIONS = 2  # Compare last 2 versions
+
+# Tabla auxiliar simple para persistencia incremental del estado de schema drift
+import hashlib
+SCHEMA_STATE_TABLE = f"{CATALOG}.{SCHEMA}.bronze_schema_state_simple"
+
+# Crear tabla de control si no existe
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA_STATE_TABLE} (
+    table_name STRING,
+    last_schema_hash STRING,
+    last_checked_version BIGINT,
+    last_checked_timestamp TIMESTAMP
+) USING DELTA
+COMMENT 'Estado incremental simple de schema para monitoreo de drift (persistencia incremental)'
+TBLPROPERTIES (
+    'quality.dimension' = 'schema_stability',
+    'monitoring.type' = 'drift_detection_state_simple'
+)
+""")
 
 print("🔍 Drift Monitoring Configuration")
 print(f"   Catalog: {CATALOG}")
@@ -175,22 +192,12 @@ def get_table_schema_from_delta(table_name, catalog, schema):
     """
     Extract current schema directly from Delta table metadata.
     Uses DESCRIBE TABLE (zero-compute operation).
-    
-    Args:
-        table_name: Table name without catalog/schema prefix
-        catalog: Unity Catalog name
-        schema: Schema name
-        
-    Returns:
-        dict with schema metadata
+    Adds schema_hash for drift state persistence.
     """
     full_table_name = f"{catalog}.{schema}.{table_name}"
-    
     try:
         # Get current schema from DESCRIBE TABLE
         schema_info = spark.sql(f"DESCRIBE TABLE {full_table_name}").collect()
-        
-        # Filter business columns (exclude metadata and partition columns)
         business_columns = sorted([
             row.col_name 
             for row in schema_info 
@@ -198,21 +205,20 @@ def get_table_schema_from_delta(table_name, catalog, schema):
             and row.col_name not in ['year', 'year_month', '# Partition Information', 'Part 0']
             and not row.col_name.startswith('#')
         ])
-        
         # Get latest version from Delta History
         history = spark.sql(f"DESCRIBE HISTORY {full_table_name} LIMIT 1").collect()
         current_version = history[0].version if history else 0
         current_timestamp = history[0].timestamp if history else datetime.now()
-        
+        schema_hash = hashlib.sha256(",".join(business_columns).encode()).hexdigest()
         return {
             "table_name": table_name,
             "full_table_name": full_table_name,
             "version": current_version,
             "timestamp": current_timestamp,
             "column_count": len(business_columns),
-            "columns": business_columns
+            "columns": business_columns,
+            "schema_hash": schema_hash
         }
-        
     except Exception as e:
         print(f"⚠️  Error extracting schema for {table_name}: {str(e)}")
         return None
@@ -410,21 +416,32 @@ def generate_alert_record(table_name, drift_info, severity, action_required, cri
     }
 
 
+from pyspark.sql.types import StructType, StructField, StringType, ArrayType, BooleanType, TimestampType, LongType
+
 def write_alert(alert_record, alert_table):
     """
     Write alert to Delta table.
-    
     Args:
         alert_record: dict from generate_alert_record()
         alert_table: Full table name for alerts
     """
-    alert_df = spark.createDataFrame([alert_record])
-    
-    alert_df.write \
-        .format("delta") \
-        .mode("append") \
-        .saveAsTable(alert_table)
-    
+    schema = StructType([
+        StructField("alert_id", StringType(), False),
+        StructField("table_name", StringType(), False),
+        StructField("version_current", LongType(), False),
+        StructField("version_previous", LongType(), False),
+        StructField("new_columns", ArrayType(StringType()), True),
+        StructField("removed_columns", ArrayType(StringType()), True),
+        StructField("detected_timestamp", TimestampType(), False),
+        StructField("alert_type", StringType(), False),
+        StructField("severity", StringType(), False),
+        StructField("critical_columns_affected", BooleanType(), False),
+        StructField("action_required", StringType(), False),
+        StructField("layer", StringType(), False),
+        StructField("notified", BooleanType(), False)
+    ])
+    alert_df = spark.createDataFrame([alert_record], schema=schema)
+    alert_df.write.format("delta").mode("append").saveAsTable(alert_table)
     severity_emoji = {"HIGH": "🚨", "MEDIUM": "⚠️", "LOW": "ℹ️"}.get(alert_record["severity"], "📋")
     print(f"   {severity_emoji} Alert logged: {alert_record['severity']} - {alert_record['alert_type']}")
 
@@ -445,68 +462,79 @@ print("-" * 80)
 drift_detected_count = 0
 alerts_generated = 0
 
+
 for table_name in BRONZE_TABLES:
     print(f"\n🔎 Analyzing: {table_name}")
     print("-" * 60)
-    
+
     # Step 1: Get current schema
     current_schema = get_table_schema_from_delta(table_name, CATALOG, SCHEMA)
-    
     if not current_schema:
         print(f"   ⚠️  Skipping {table_name} (schema extraction failed)")
         continue
-    
+
     print(f"   📌 Current Version: {current_schema['version']}")
     print(f"   📋 Current Columns: {current_schema['column_count']} business columns")
-    
-    # Step 2: Get previous schema
-    try:
-        previous_schema = get_previous_schema_from_delta_history(
-            table_name, CATALOG, SCHEMA, current_schema['version']
-        )
-    except Exception as e:
-        print(f"🛑 RUN FAILED: No se pudo extraer el schema previo para {table_name}. Abortando monitoreo.")
-        run_failed = True
-        break
-    if not previous_schema:
-        print(f"   ℹ️  No drift detection (first run or no previous version)")
+
+    # Step 2: Leer último estado persistido
+    state_df = spark.sql(f"SELECT * FROM {SCHEMA_STATE_TABLE} WHERE table_name = '{table_name}' LIMIT 1")
+    state = state_df.collect()
+    if state:
+        last_schema_hash = state[0]["last_schema_hash"]
+        last_checked_version = state[0]["last_checked_version"]
+        # Si el hash es igual, no hay drift
+        if last_schema_hash == current_schema["schema_hash"]:
+            print(f"   ✅ No drift detected (schema stable)")
+            continue
+        # Si el hash es distinto, buscar el schema previo para comparar (solo para alerta)
+        previous_schema = {
+            "table_name": table_name,
+            "version": last_checked_version,
+            "timestamp": None,
+            "column_count": current_schema["column_count"],
+            "columns": []  # No se requiere para alerta, solo para consistencia
+        }
+    else:
+        # Primer run: persistir estado y continuar
+        print(f"   ℹ️  No drift detection (first run, baseline persisted)")
+        spark.sql(f"""
+        INSERT INTO {SCHEMA_STATE_TABLE} VALUES ('{table_name}', '{current_schema['schema_hash']}', {current_schema['version']}, current_timestamp())
+        """)
         continue
-    
-    print(f"   📌 Previous Version: {previous_schema['version']}")
-    print(f"   📋 Previous Columns: {previous_schema['column_count']} business columns")
-    
-    # Step 3: Detect drift
-    drift_info = detect_schema_drift(current_schema, previous_schema)
-    
-    if not drift_info["has_drift"]:
-        print(f"   ✅ No drift detected (schema stable)")
-        continue
-    
-    # Drift detected!
-    drift_detected_count += 1
+
+    # Step 3: Detect drift (comparar solo para alerta, columnas no disponibles en baseline simple)
     print(f"   🔔 DRIFT DETECTED!")
-    
-    if drift_info["new_columns"]:
-        print(f"      ➕ New Columns: {drift_info['new_columns']}")
-    
-    if drift_info["removed_columns"]:
-        print(f"      ➖ Removed Columns: {drift_info['removed_columns']}")
-    
-    # Step 4: Classify severity
+    # Step 4: Classify severity (solo con columnas actuales)
+    drift_info = {
+        "has_drift": True,
+        "new_columns": [],
+        "removed_columns": [],
+        "current_version": current_schema["version"],
+        "previous_version": last_checked_version,
+        "current_timestamp": current_schema["timestamp"],
+        "column_count_current": current_schema["column_count"],
+        "column_count_previous": None
+    }
     severity, action_required, critical_affected = classify_drift_severity(
         drift_info, table_name, CRITICAL_COLUMNS
     )
-    
     print(f"   📊 Severity: {severity}")
     print(f"   📝 Action: {action_required[:80]}...")
-    
+
     # Step 5: Generate and write alert
     alert_record = generate_alert_record(
         table_name, drift_info, severity, action_required, critical_affected
     )
-    
     write_alert(alert_record, ALERT_TABLE)
     alerts_generated += 1
+
+    # Step 6: Persistir nuevo estado
+    spark.sql(f"""
+    DELETE FROM {SCHEMA_STATE_TABLE} WHERE table_name = '{table_name}'
+    """)
+    spark.sql(f"""
+    INSERT INTO {SCHEMA_STATE_TABLE} VALUES ('{table_name}', '{current_schema['schema_hash']}', {current_schema['version']}, current_timestamp())
+    """)
 
 
 if 'run_failed' in locals() and run_failed:
