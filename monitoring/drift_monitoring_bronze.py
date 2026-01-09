@@ -116,6 +116,9 @@ CRITICAL_COLUMNS = {
     "bronze_master_products": ["Product_SKU", "Product_Name"]
 }
 
+# Number of previous versions to check for drift (business-aligned lookback window)
+LOOKBACK_VERSIONS = 5
+
 # Alert table
 ALERT_TABLE = f"{CATALOG}.{SCHEMA}.bronze_schema_alerts"
 
@@ -579,8 +582,7 @@ else:
 # MAGIC ## 7. Operational Queries
 
 # COMMAND ----------
-
-# MAGIC %md
+# MAGIC 
 # MAGIC ### Recent Alerts (Last 7 Days)
 
 # COMMAND ----------
