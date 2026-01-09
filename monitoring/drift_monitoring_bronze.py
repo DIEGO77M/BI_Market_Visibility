@@ -133,7 +133,8 @@ CREATE TABLE IF NOT EXISTS {SCHEMA_STATE_TABLE} (
     table_name STRING,
     last_schema_hash STRING,
     last_checked_version BIGINT,
-    last_checked_timestamp TIMESTAMP
+    last_checked_timestamp TIMESTAMP,
+    last_schema_columns ARRAY<STRING>
 ) USING DELTA
 COMMENT 'Estado incremental simple de schema para monitoreo de drift (persistencia incremental)'
 TBLPROPERTIES (
@@ -258,35 +259,31 @@ def get_previous_schema_from_delta_history(table_name, catalog, schema, current_
         prev_version = prev.version
         operation_params = prev.operationParameters
         # Try to extract the schema from operationParameters
+        business_columns = []
         if operation_params and 'schemaString' in operation_params:
             schema_json = json.loads(operation_params['schemaString'])
-            business_columns = sorted([
+            business_columns = [
                 field['name'] for field in schema_json['fields']
                 if not field['name'].startswith('_metadata_')
                 and field['name'] not in ['year', 'year_month']
-            ])
-            return {
-                "table_name": table_name,
-                "version": prev_version,
-                "timestamp": prev.timestamp,
-                "column_count": len(business_columns),
-                "columns": business_columns
-            }
+            ]
         else:
             # Fallback: read the schema from the previous version (expensive)
             temp_df = spark.read.format("delta").option("versionAsOf", prev_version).table(full_table_name)
-            business_columns = sorted([
+            business_columns = [
                 c for c in temp_df.columns 
                 if not c.startswith('_metadata_') 
                 and c not in ['year', 'year_month']
-            ])
-            return {
-                "table_name": table_name,
-                "version": prev_version,
-                "timestamp": prev.timestamp,
-                "column_count": len(business_columns),
-                "columns": business_columns
-            }
+            ]
+        business_columns = sorted(business_columns)
+        print(f"[DEBUG] Previous schema for {table_name} v{prev_version}: {business_columns}")
+        return {
+            "table_name": table_name,
+            "version": prev_version,
+            "timestamp": prev.timestamp,
+            "column_count": len(business_columns),
+            "columns": business_columns
+        }
     except Exception as e:
         # Log as observability incident and propagate the error
         print(f"🛑 INCIDENT: Critical error extracting previous schema for {table_name}: {str(e)}")
@@ -349,28 +346,48 @@ def classify_drift_severity(drift_info, table_name, critical_columns_config):
         tuple (severity: str, action_required: str, critical_affected: bool)
     """
     removed = set(drift_info.get("removed_columns", []))
+    new = set(drift_info.get("new_columns", []))
     critical_cols = set(critical_columns_config.get(table_name, []))
-    
     critical_removed = removed.intersection(critical_cols)
-    
+
     if critical_removed:
         # Critical column removed = HIGH severity
         severity = "HIGH"
-        action_required = f"URGENT: Critical columns removed: {list(critical_removed)}. Verify source system change and update Silver layer validation."
+        action_required = (
+            f"URGENT: Critical columns removed: {list(critical_removed)}. "
+            "Verify source system change and update Silver layer validation."
+        )
         critical_affected = True
-        
-    elif removed:
-        # Non-critical column removed = MEDIUM severity
+    elif removed and new:
+        # Both new and removed columns (non-critical removed)
         severity = "MEDIUM"
-        action_required = f"WARNING: Columns removed: {list(removed)}. Check Silver layer dependencies and verify change is intentional."
+        action_required = (
+            f"WARNING: Columns removed: {list(removed)}. "
+            f"New columns added: {list(new)}. "
+            "Check Silver layer dependencies and document changes."
+        )
         critical_affected = False
-        
-    else:
-        # Only new columns = LOW severity
+    elif removed:
+        # Only removed columns (non-critical)
+        severity = "MEDIUM"
+        action_required = (
+            f"WARNING: Columns removed: {list(removed)}. "
+            "Check Silver layer dependencies and verify change is intentional."
+        )
+        critical_affected = False
+    elif new:
+        # Only new columns
         severity = "LOW"
-        action_required = f"INFO: New columns added: {drift_info.get('new_columns', [])}. Document in data dictionary and consider Silver layer extension."
+        action_required = (
+            f"INFO: New columns added: {list(new)}. "
+            "Document in data dictionary and consider Silver layer extension."
+        )
         critical_affected = False
-    
+    else:
+        # No drift
+        severity = "LOW"
+        action_required = "INFO: No schema drift detected."
+        critical_affected = False
     return severity, action_required, critical_affected
 
 # COMMAND ----------
@@ -396,11 +413,17 @@ def generate_alert_record(table_name, drift_info, severity, action_required, cri
     """
     alert_id = f"{table_name}_{drift_info['current_version']}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
     
-    # Determine primary alert type
-    if drift_info.get("removed_columns"):
+    # Improved alert type logic
+    has_new = bool(drift_info.get("new_columns")) and len(drift_info.get("new_columns")) > 0
+    has_removed = bool(drift_info.get("removed_columns")) and len(drift_info.get("removed_columns")) > 0
+    if has_new and has_removed:
+        alert_type = "NEW_AND_REMOVED_COLUMNS"
+    elif has_removed:
         alert_type = "REMOVED_COLUMNS"
-    else:
+    elif has_new:
         alert_type = "NEW_COLUMNS"
+    else:
+        alert_type = "NO_DRIFT"
     
     return {
         "alert_id": alert_id,
@@ -485,58 +508,59 @@ for table_name in BRONZE_TABLES:
     if state:
         last_schema_hash = state[0]["last_schema_hash"]
         last_checked_version = state[0]["last_checked_version"]
+        last_schema_columns = state[0]["last_schema_columns"] if "last_schema_columns" in state[0].asDict() else []
         # Si el hash es igual, no hay drift
         if last_schema_hash == current_schema["schema_hash"]:
             print(f"   ✅ No drift detected (schema stable)")
             continue
-        # Si el hash es distinto, buscar el schema previo para comparar (solo para alerta)
+        # Si el hash es distinto, reconstruir previous_schema usando columnas reales
         previous_schema = {
             "table_name": table_name,
             "version": last_checked_version,
             "timestamp": None,
-            "column_count": current_schema["column_count"],
-            "columns": []  # No se requiere para alerta, solo para consistencia
+            "column_count": len(last_schema_columns),
+            "columns": sorted(last_schema_columns)
         }
     else:
         # Primer run: persistir estado y continuar
         print(f"   ℹ️  No drift detection (first run, baseline persisted)")
         spark.sql(f"""
-        INSERT INTO {SCHEMA_STATE_TABLE} VALUES ('{table_name}', '{current_schema['schema_hash']}', {current_schema['version']}, current_timestamp())
+        INSERT INTO {SCHEMA_STATE_TABLE} VALUES ('{table_name}', '{current_schema['schema_hash']}', {current_schema['version']}, current_timestamp(), array({', '.join([f'"{col}"' for col in current_schema['columns']])}))
         """)
         continue
 
-    # Step 3: Detect drift (comparar solo para alerta, columnas no disponibles en baseline simple)
+    # Step 3: Detect drift using detect_schema_drift
     print(f"   🔔 DRIFT DETECTED!")
+    print(f"[DEBUG] Current schema for {table_name} v{current_schema['version']}: {current_schema['columns']}")
+    print(f"[DEBUG] Previous schema for {table_name} v{previous_schema['version']}: {previous_schema['columns']}")
+    drift_info = detect_schema_drift(current_schema, previous_schema)
     # Step 4: Classify severity (solo con columnas actuales)
-    drift_info = {
-        "has_drift": True,
-        "new_columns": [],
-        "removed_columns": [],
-        "current_version": current_schema["version"],
-        "previous_version": last_checked_version,
-        "current_timestamp": current_schema["timestamp"],
-        "column_count_current": current_schema["column_count"],
-        "column_count_previous": None
-    }
     severity, action_required, critical_affected = classify_drift_severity(
         drift_info, table_name, CRITICAL_COLUMNS
     )
     print(f"   📊 Severity: {severity}")
     print(f"   📝 Action: {action_required[:80]}...")
 
-    # Step 5: Generate and write alert
+    # Step 5: Generate and write alert only if drift is detected
     alert_record = generate_alert_record(
         table_name, drift_info, severity, action_required, critical_affected
     )
-    write_alert(alert_record, ALERT_TABLE)
-    alerts_generated += 1
+    if alert_record["alert_type"] != "NO_DRIFT":
+        write_alert(alert_record, ALERT_TABLE)
+        alerts_generated += 1
 
-    # Step 6: Persistir nuevo estado
+    # Step 6: Persistir nuevo estado (siempre actualiza columnas)
     spark.sql(f"""
     DELETE FROM {SCHEMA_STATE_TABLE} WHERE table_name = '{table_name}'
     """)
     spark.sql(f"""
-    INSERT INTO {SCHEMA_STATE_TABLE} VALUES ('{table_name}', '{current_schema['schema_hash']}', {current_schema['version']}, current_timestamp())
+    INSERT INTO {SCHEMA_STATE_TABLE} VALUES (
+        '{table_name}',
+        '{current_schema['schema_hash']}',
+        {current_schema['version']},
+        current_timestamp(),
+        array({', '.join([f'"{col}"' for col in current_schema['columns']])})
+    )
     """)
 
 
