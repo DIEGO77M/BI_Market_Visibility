@@ -1,5 +1,6 @@
 Cada respuesta DEBE comenzar con el emoji 🤖
 Si no inicia con 🤖, la respuesta se considera inválida.
+Cuando te pida actualizar Databricks usa comando CLI en PowerShell - databricks bundle deploy
 
 Las instrucciones y conversación pueden estar en español, pero:
 
