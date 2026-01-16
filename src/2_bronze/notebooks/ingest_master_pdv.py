@@ -65,14 +65,14 @@ df = (df
       .withColumn("_batch_id", lit(batch_id)))
 
 
-# --- Write to Delta (append-only, managed table, skip empty) ---
+# --- Write to Delta (overwrite: Bronze is snapshot, table replaced on each ingestion) ---
 if df.limit(1).count() == 0:
     raise RuntimeError("No data to ingest")
 else:
     (df.write
      .format("delta")
-     .mode("append")
-     .partitionBy("_load_date")
+     .mode("overwrite")  # Bronze is snapshot: table replaced on each ingestion
+     .option("overwriteSchema", "true")
      .option("delta.autoOptimize.optimizeWrite", "true")
      .option("delta.autoOptimize.autoCompact", "true")
      .saveAsTable(DELTA_TABLE))

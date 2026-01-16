@@ -29,6 +29,19 @@ ARQUITECTURA DE DATOS (MANDATORIA)
 - Estas tablas serán consumidas posteriormente por n8n (no integrar n8n directamente)
 
 BRONZE
+
+Detalles de capa Bronze:  
+Script de Ingesta = Responsabilidad: Leer archivo → Agregar metadatos → Escribir Delta
+Script de Validación = Responsabilidad: Validaciones técnicas pre/post escritura
+Script de Monitoring = Responsabilidad: Métricas, logging, alertas
+
+- Usa exclusivamente estas rutas en databricks cómo fuente de raw_data:
+/Volumes/workspace/raw_data/master_pdv
+/Volumes/workspace/raw_data/master_products
+/Volumes/workspace/raw_data/price_audit
+/Volumes/workspace/raw_data/sell_in
+
+
 - Usar exclusivamente estas tablas como fuente:
 ---------------------------------------------------------
 ---------------------------------------------------------
