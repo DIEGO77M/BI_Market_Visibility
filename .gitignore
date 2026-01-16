@@ -1,0 +1,6 @@
+# .gitignore
+# Add files and directories to ignore below
+
+.databricks
+
+.databricks
