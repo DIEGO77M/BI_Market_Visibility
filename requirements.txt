@@ -1,0 +1,6 @@
+pandas
+numpy
+pyyaml
+databricks-cli==0.17.0
+databricks-bundle
+requests
