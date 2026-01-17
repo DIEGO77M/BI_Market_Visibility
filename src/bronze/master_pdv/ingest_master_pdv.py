@@ -51,8 +51,10 @@ def run_ingestion(
     """
 
     # --- Define business schema: all columns as STRING for flexibility in Bronze ---
+    # 'Code (eLeader)' is the business primary key for master_pdv. It uniquely identifies each point of sale (PDV) in the dataset.
     BUSINESS_COLUMNS = [
-        "Code (eLeader)", "Store Name", "Channel", "Sub Channel", "Chain", 
+        "Code (eLeader)",  # Business primary key (unique PDV identifier)
+        "Store Name", "Channel", "Sub Channel", "Chain", 
         "Neighborhood", "City", "Parish", "Country", "Latitude", "Longitude", 
         "Type of Service", "Status", "Supervisor Code", "Supervisor Name", 
         "Merchandiser Code", "Merchandiser Name", "CODE PO", 
@@ -115,4 +117,4 @@ def run_ingestion(
 # --- Allow local testing via CLI ---
 if __name__ == "__main__":
     batch_id, rows = run_ingestion()
-    print(f"Batch ingresado: {batch_id} | Filas insertadas: {rows}")
+    print(f"Batch processed: {batch_id} | Rows inserted: {rows}")

@@ -51,8 +51,10 @@ def run_ingestion(
     """
 
     # --- Define business schema: all columns as STRING for flexibility in Bronze ---
+    # 'Product_Code' is the business primary key for master_products. It uniquely identifies each product in the dataset.
     BUSINESS_COLUMNS = [
-        "Product_Code", "Product_Name", "Brand", "Segment", "Subsegment", "Category", "Subcategory"
+        "Product_Code",  # Business primary key (unique product identifier)
+        "Product_Name", "Brand", "Segment", "Subsegment", "Category", "Subcategory"
     ]
     SCHEMA = StructType([StructField(c, StringType(), True) for c in BUSINESS_COLUMNS])
 
@@ -110,4 +112,4 @@ def run_ingestion(
 # --- Allow local testing via CLI ---
 if __name__ == "__main__":
     batch_id, rows = run_ingestion()
-    print(f"Batch ingresado: {batch_id} | Filas insertadas: {rows}")
+    print(f"Batch processed: {batch_id} | Rows inserted: {rows}")
