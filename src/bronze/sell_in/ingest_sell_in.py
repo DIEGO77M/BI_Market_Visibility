@@ -31,8 +31,8 @@ def run_ingestion(
     supported_extensions = ["xlsx", "xls"],
     business_keys = ["Year", "Month", "PDV_Code", "Product_Code"],
     env: str = "dev",
-    dbutils=None
 ):
+    
     """
     Incremental ingestion for Excel files in Databricks Serverless.
     Converts Excel to Spark DataFrame via Pandas to bypass Serverless limitations.
@@ -43,7 +43,6 @@ def run_ingestion(
         supported_extensions (list): Supported Excel file extensions (default: ["xlsx", "xls"]).
         business_keys (list): List of business key columns for deduplication.
         env (str): Environment label (dev/staging/prod).
-        dbutils: Databricks utility object for file listing (optional, recommended for notebook orchestration).
 
     Returns:
         tuple: batch_id (str), total_rows_inserted (int)
@@ -52,14 +51,10 @@ def run_ingestion(
     batch_id = str(uuid.uuid4())
 
     # --- List Excel files from Unity Catalog Volume ---
+
+    import os
     try:
-        # Use dbutils if provided, else fallback to globals
-        dbutils_obj = dbutils if dbutils is not None else globals().get('dbutils', None)
-        if dbutils_obj is not None:
-            files_info = dbutils_obj.fs.ls(source_path)
-            files = [f.path for f in files_info if any(f.name.endswith(ext) for ext in supported_extensions)]
-        else:
-            raise NameError("dbutils is not defined or not passed. This script must be run in a Databricks notebook or with dbutils available.")
+        files = [os.path.join(source_path, f) for f in os.listdir(source_path) if any(f.endswith(ext) for ext in supported_extensions)]
     except Exception as e:
         print(f"[{env}] Error accessing path: {str(e)}")
         return batch_id, 0
