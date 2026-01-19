@@ -73,6 +73,13 @@ def run_monitoring(
 
     agg_result = df.agg(*agg_exprs).first()
 
+    # --- File-level metrics ---
+    unique_files_count = df.select("_source_file").distinct().count() if "_source_file" in df.columns else None
+    records_per_file = (
+        df.groupBy("_source_file").count().agg(F.avg("count")).first()[0]
+        if "_source_file" in df.columns and unique_files_count and unique_files_count > 0 else None
+    )
+
     # --- Latest batch info ---
     latest_row = df.select("_batch_id", "_source_file").orderBy(F.col("_ingestion_timestamp").desc()).limit(1).first()
     batch_id = latest_row["_batch_id"] if latest_row else None
@@ -83,6 +90,8 @@ def run_monitoring(
     metrics = [
         Row(metric="total_records", value=str(agg_result["total_records"]), detail=""),
         Row(metric="fully_empty_rows", value=str(agg_result["fully_empty_rows"]), detail=""),
+        Row(metric="unique_files_count", value=str(unique_files_count) if unique_files_count is not None else "N/A", detail="Unique _source_file values (files) in batch"),
+        Row(metric="avg_records_per_file", value=str(records_per_file) if records_per_file is not None else "N/A", detail="Average records per file in batch"),
         Row(metric="missing_columns", value=str(len(missing_columns)), detail=", ".join(missing_columns) if missing_columns else "None"),
         Row(metric="extra_columns", value=str(len(extra_columns)), detail=", ".join(extra_columns) if extra_columns else "None"),
         Row(metric="schema_match", value=str(schema_match), detail="true = schema aligned with expected contract")

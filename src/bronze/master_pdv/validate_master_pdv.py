@@ -72,6 +72,14 @@ def run_validation(
             F.count(F.when((F.col(col_name) == "") | (F.length(F.col(col_name)) == 0), 1)).alias(f"empty_count_{col_name}")
         )
 
+    # --- Business Key Nulls (Code (eLeader)) ---
+    agg_exprs.append(
+        F.count(F.when(F.col("Code (eLeader)").isNull(), 1)).alias("null_count_business_key")
+    )
+    agg_exprs.append(
+        F.count(F.when((F.col("Code (eLeader)") == "") | (F.length(F.col("Code (eLeader)")) == 0), 1)).alias("empty_count_business_key")
+    )
+
     # Fully empty rows condition
     fully_empty_condition = reduce(
         lambda acc, c: acc & (F.col(c).isNull() | (F.col(c) == "") | (F.length(F.col(c)) == 0)),
@@ -88,6 +96,8 @@ def run_validation(
     metrics = []
 
     metrics.append(Row(metric="total_records", value=str(agg_result["total_records"]), detail=""))
+    metrics.append(Row(metric="null_count_business_key", value=str(agg_result["null_count_business_key"]), detail="Nulls in business key: Code (eLeader)"))
+    metrics.append(Row(metric="empty_count_business_key", value=str(agg_result["empty_count_business_key"]), detail="Empty values in business key: Code (eLeader)"))
     metrics.append(Row(metric="missing_columns", value=str(len(missing_columns)), detail=", ".join(missing_columns) if missing_columns else "None"))
     metrics.append(Row(metric="extra_columns", value=str(len(extra_columns)), detail=", ".join(extra_columns) if extra_columns else "None"))
     metrics.append(Row(metric="fully_empty_rows", value=str(agg_result["fully_empty_rows"]), detail=""))

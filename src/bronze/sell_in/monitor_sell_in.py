@@ -94,6 +94,13 @@ def run_monitoring(
 
     agg_result = df.agg(*agg_exprs).first()
 
+    # --- File-level metrics ---
+    unique_files_count = df.select("_source_file").distinct().count() if "_source_file" in df.columns else None
+    records_per_file = (
+        df.groupBy("_source_file").count().agg(F.avg("count")).first()[0]
+        if "_source_file" in df.columns and unique_files_count and unique_files_count > 0 else None
+    )
+
     # --- Latest source_file info ---
     if batch_id:
         source_row = df.select("_source_file").limit(1).first()
@@ -106,6 +113,8 @@ def run_monitoring(
     metrics = [
         Row(metric="monitoring_scope", value=batch_id or load_date or "full_table", detail=f"batch_id={batch_id}, load_date={load_date}"),
         Row(metric="total_records", value=str(agg_result["total_records"]), detail=""),
+        Row(metric="unique_files_count", value=str(unique_files_count) if unique_files_count is not None else "N/A", detail="Unique _source_file values (files) in batch"),
+        Row(metric="avg_records_per_file", value=str(records_per_file) if records_per_file is not None else "N/A", detail="Average records per file in batch"),
         Row(metric="fully_empty_rows", value=str(agg_result["fully_empty_rows"]), detail=""),
         Row(metric="missing_columns", value=str(len(missing_columns)), detail=", ".join(missing_columns) if missing_columns else "None"),
         Row(metric="extra_columns", value=str(len(extra_columns)), detail=", ".join(extra_columns) if extra_columns else "None"),

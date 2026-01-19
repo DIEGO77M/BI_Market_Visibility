@@ -91,6 +91,15 @@ def run_validation(
             F.count(F.when((F.col(col_name) == "") | (F.length(F.col(col_name)) == 0), 1)).alias(f"empty_count_{col_name}")
         )
 
+    # --- Business Key Nulls (PDV_Code, Product_Code, Year, Month) ---
+    for key_col in ["PDV_Code", "Product_Code", "Year", "Month"]:
+        agg_exprs.append(
+            F.count(F.when(F.col(key_col).isNull(), 1)).alias(f"null_count_business_key_{key_col}")
+        )
+        agg_exprs.append(
+            F.count(F.when((F.col(key_col) == "") | (F.length(F.col(key_col)) == 0), 1)).alias(f"empty_count_business_key_{key_col}")
+        )
+
     # Helper function for empty column check
     def is_empty(col_name):
         return (F.col(col_name).isNull()) | (F.col(col_name) == "") | (F.length(F.col(col_name)) == 0)
@@ -110,6 +119,9 @@ def run_validation(
     metrics = []
 
     metrics.append(Row(metric="total_records", value=str(agg_result["total_records"]), detail=""))
+    for key_col in ["PDV_Code", "Product_Code", "Year", "Month"]:
+        metrics.append(Row(metric=f"null_count_business_key_{key_col}", value=str(agg_result[f"null_count_business_key_{key_col}"]), detail=f"Nulls in business key: {key_col}"))
+        metrics.append(Row(metric=f"empty_count_business_key_{key_col}", value=str(agg_result[f"empty_count_business_key_{key_col}"]), detail=f"Empty values in business key: {key_col}"))
     # Add validation_scope metric for monitoring/debugging
     scope_value = batch_id if batch_id else (load_date if load_date else "full_table")
     scope_detail = f"batch_id={batch_id}, load_date={load_date}"
