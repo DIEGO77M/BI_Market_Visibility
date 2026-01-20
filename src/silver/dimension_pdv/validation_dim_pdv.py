@@ -1,5 +1,5 @@
 """
-DimPDVValidator: Data Quality Validation for Silver PDV Dimension
+ValidatorDimPDV: Data Quality Validation for Silver PDV Dimension
 
 This script evaluates the data quality of the Silver PDV dimension (workspace.silver.dim_pdv),
 applying explicit, business-driven validation rules. It produces persistent, auditable validation results
@@ -15,9 +15,9 @@ import logging
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("DimPDVValidator")
+logger = logging.getLogger("ValidatorDimPDV")
 
-class DimPDVValidator:
+class ValidatorDimPDV:
     def __init__(self, spark: SparkSession, silver_table: str, results_table: str, metrics_table: str):
         self.spark = spark
         self.silver_table = silver_table
@@ -250,7 +250,7 @@ def run_validation_dim_pdv(
     if spark is None:
         spark = SparkSession.builder.getOrCreate()
         local_spark = True
-    validator = DimPDVValidator(
+    validator = ValidatorDimPDV(
         spark=spark,
         silver_table=silver_table,
         results_table=results_table,
