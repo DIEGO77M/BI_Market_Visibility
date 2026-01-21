@@ -65,7 +65,7 @@ class SilverProductsTransformer:
             "target_table", "workspace.silver.dim_products"
         )
 
-        # Partition strategy (query + maintenance friendly)
+        # Partition strategy (mantener load_date y category)
         self.partition_cols = ["load_date", "category"]
 
         # Business-approved default values (explicit and auditable)
@@ -266,7 +266,6 @@ class SilverProductsTransformer:
         self.logger.info(f"Ensuring Silver table exists: {self.target_table}")
 
         partition_clause = ", ".join(self.partition_cols)
-
         self.spark.sql(
             f"""
             CREATE TABLE IF NOT EXISTS {self.target_table} (
@@ -314,7 +313,6 @@ class SilverProductsTransformer:
             MERGE INTO {self.target_table} AS target
             USING {temp_view} AS source
             ON target.product_code = source.product_code
-               AND target.load_date = source.load_date
             WHEN MATCHED THEN UPDATE SET
                 target.product_name = source.product_name,
                 target.brand = source.brand,
@@ -325,6 +323,7 @@ class SilverProductsTransformer:
                 target.product_full_name = source.product_full_name,
                 target.product_hierarchy = source.product_hierarchy,
                 target.ingestion_timestamp = source.ingestion_timestamp,
+                target.load_date = source.load_date,
                 target.source_file = source.source_file,
                 target.bronze_batch_id = source.bronze_batch_id,
                 target.silver_processed_at = source.silver_processed_at,
