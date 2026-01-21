@@ -269,13 +269,6 @@ class TransformationDimPDV:
         WHEN NOT MATCHED THEN INSERT *
         """)
         self.logger.info("Silver write (MERGE) completed.")
-    """
-    Main transformation class for Silver master_pdv dimension.
-    Encapsulates all transformation logic and Silver write.
-    """
-    def __init__(self, spark: SparkSession):
-        self.spark = spark
-        self.logger = logging.getLogger("TransformationDimPDV")
 
 
 
