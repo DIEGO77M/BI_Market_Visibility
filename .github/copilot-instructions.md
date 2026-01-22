@@ -245,6 +245,6 @@ KPIs explain what it means for the business.
 
 Si una solución rompe este principio, NO pertenece a la capa Gold.
 
-Al desplegar en Databricks siempre con --profile DTB_Market_Visibility
+Siempre que diga despliega, envias el comando databricks bundle deploy --profile DTB_Market_Visibility
 
 Cuando crees un archivo trata de posicionarlo en la carpeta correcta para la presentación del proyecto.

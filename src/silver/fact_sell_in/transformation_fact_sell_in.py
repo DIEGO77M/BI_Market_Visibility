@@ -234,9 +234,18 @@ class SilverFactSellInTransformer:
             "status": "success"
         }
 
+
+# Public function for orchestrators and testing (standardized signature)
+def run_silver_fact_sell_in_transformation(spark: SparkSession) -> dict:
+    """
+    Runs the Silver Sell-In fact table transformation pipeline.
+    Returns a structured result dict for monitoring and audit.
+    """
+    transformer = SilverFactSellInTransformer(spark)
+    return transformer.run()
+
 # Entrypoint for orchestrators, jobs, and notebooks
 if __name__ == "__main__":
     spark = SparkSession.builder.getOrCreate()
-    transformer = SilverFactSellInTransformer(spark)
-    result = transformer.run()
+    result = run_silver_fact_sell_in_transformation(spark)
     print(result)

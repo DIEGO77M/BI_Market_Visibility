@@ -1,246 +1,166 @@
 """
-MonitorDimPDV: Data Quality Monitoring for Silver PDV Dimension
+SilverFactSellInTransformer
 
-This script implements a production-grade, serverless-compatible monitoring layer for the Silver PDV dimension.
-It consumes only persistent validation metrics, evaluates dataset health, detects trends, and produces actionable monitoring outputs.
-
-Key Features:
-- 100% Serverless-compatible (no .collect() operations)
-- Single-pass aggregations for optimal performance
-- Comprehensive metric coverage (overall + detailed violations)
-- Trend detection with moving averages
-- Partitioned writes for efficient querying
+Production-grade transformation layer for Sell-In fact table.
+- Serverless compatible
+- Unity Catalog compatible
+- Idempotent (MERGE INTO)
+- Transformation only (no validation, no monitoring)
 
 Author: Senior Data Engineer (Portfolio)
 """
 
 from pyspark.sql import SparkSession, DataFrame, functions as F, types as T
-from pyspark.sql.window import Window
-from datetime import datetime
 import logging
 
-# Configure logging
+# ---------------------------------------------------------------------
+# Logging configuration
+# ---------------------------------------------------------------------
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("MonitoringDimPDV")
+logger = logging.getLogger("SilverFactSellInTransformer")
 
-class MonitoringDimPDV:
-    def __init__(self, spark: SparkSession, metrics_table: str, monitoring_table: str):
+
+class SilverFactSellInTransformer:
+    def __init__(
+        self,
+        spark: SparkSession,
+        source_table: str,
+        target_table: str
+    ):
         self.spark = spark
-        self.metrics_table = metrics_table
-        self.monitoring_table = monitoring_table
-        self.current_date = datetime.now().date()
+        self.source_table = source_table
+        self.target_table = target_table
 
-    def _read_metrics(self) -> DataFrame:
-        logger.info(f"Reading metrics table: {self.metrics_table}")
-        return self.spark.table(self.metrics_table)
+    # -----------------------------------------------------------------
+    # Read Bronze
+    # -----------------------------------------------------------------
+    def _read_bronze(self) -> DataFrame:
+        logger.info(f"Reading bronze source table: {self.source_table}")
+        return self.spark.table(self.source_table)
 
-    def _evaluate_health_status(self, df: DataFrame) -> DataFrame:
-        logger.info("Evaluating dataset health status")
-        CRITICAL_THRESHOLD = 1
-        VALID_PCT_SLA = 95.0
-        MAJOR_THRESHOLD = 10
-        df = df.withColumn(
-            "has_critical_alert",
-            (F.col("critical_violations") >= CRITICAL_THRESHOLD) | (F.col("valid_percentage") < VALID_PCT_SLA)
-        )
-        df = df.withColumn(
-            "has_degraded_alert",
-            (F.col("major_violations") > MAJOR_THRESHOLD) & (~F.col("has_critical_alert"))
-        )
-        df = df.withColumn(
-            "dataset_health_status",
-            F.when(F.col("has_critical_alert"), F.lit("CRITICAL"))
-             .when(F.col("has_degraded_alert"), F.lit("DEGRADED"))
-             .otherwise(F.lit("HEALTHY"))
-        )
-        return df
+    # -----------------------------------------------------------------
+    # Transform
+    # -----------------------------------------------------------------
+    def _transform(self, df: DataFrame) -> DataFrame:
+        logger.info("Applying Silver fact transformations")
 
-    def _evaluate_detailed_metrics(self, df: DataFrame) -> DataFrame:
-        logger.info("Evaluating detailed violation metrics")
-        BUSINESS_KEY_THRESHOLD = 5
-        COORDINATES_THRESHOLD = 10
-        DOMAIN_THRESHOLD = 15
-        LOGIC_THRESHOLD = 8
-        TEMPORAL_THRESHOLD = 5
-        df = df.withColumn(
-            "has_business_key_alert",
-            F.col("business_key_violations") > BUSINESS_KEY_THRESHOLD
-        )
-        df = df.withColumn(
-            "has_coordinates_alert",
-            F.col("coordinates_violations") > COORDINATES_THRESHOLD
-        )
-        df = df.withColumn(
-            "has_domain_alert",
-            F.col("domain_violations") > DOMAIN_THRESHOLD
-        )
-        df = df.withColumn(
-            "has_logic_alert",
-            F.col("logic_violations") > LOGIC_THRESHOLD
-        )
-        df = df.withColumn(
-            "has_temporal_alert",
-            F.col("temporal_violations") > TEMPORAL_THRESHOLD
-        )
-        df = df.withColumn(
-            "detailed_alerts_count",
-            (F.col("has_business_key_alert").cast("int") +
-             F.col("has_coordinates_alert").cast("int") +
-             F.col("has_domain_alert").cast("int") +
-             F.col("has_logic_alert").cast("int") +
-             F.col("has_temporal_alert").cast("int"))
-        )
-        return df
+        df = (
+            df.select(
+                F.col("PDV_Code").alias("pdv_code"),
+                F.col("Product_Code").alias("product_code"),
 
-    def _detect_trends(self, df: DataFrame) -> DataFrame:
-        logger.info("Detecting trends in validation metrics (serverless-compatible)")
-        # --- TRADE-OFF EXPLANATION ---
-        # This moving window assumes one row per day (or execution), no missing days, and a relatively small dataset.
-        # If there are gaps in the time series (missing days/executions), the moving average will still use the last 7 rows,
-        # not necessarily the last 7 calendar days. This is a pragmatic choice for serverless performance and simplicity.
-        # In high-frequency or large-scale environments, consider a time-based window or explicit date gap handling.
-        window_spec = (
-            Window
-            .partitionBy()
-            .orderBy(F.col("execution_date").desc())
-            .rowsBetween(0, 6)
-        )
-        df = df.withColumn(
-            "valid_pct_ma7",
-            F.avg(F.col("valid_percentage")).over(window_spec)
-        )
-        df = df.withColumn(
-            "critical_ma7",
-            F.avg(F.col("critical_violations")).over(window_spec)
-        )
-        df = df.withColumn(
-            "has_trend_warning",
-            (
-                (F.col("valid_percentage") < F.col("valid_pct_ma7")) |
-                (F.col("critical_violations") > F.col("critical_ma7"))
+                F.col("Year").cast(T.IntegerType()).alias("year"),
+                F.col("Month").cast(T.IntegerType()).alias("month"),
+
+                F.col("Opening_Stock_Units").cast(T.IntegerType()).alias("opening_stock_units"),
+                F.col("Sell_In_Units").cast(T.IntegerType()).alias("sell_in_units"),
+                F.col("Returns_Units").cast(T.IntegerType()).alias("returns_units"),
+                F.col("Closing_Stock_Units").cast(T.IntegerType()).alias("closing_stock_units"),
+
+                F.col("Days_of_Inventory").cast(T.DecimalType(10, 2)).alias("days_of_inventory"),
+                F.col("Inventory_Turnover").cast(T.DecimalType(10, 2)).alias("inventory_turnover"),
+
+                F.col("Replenishment_Flag").alias("replenishment_flag"),
+                F.col("Stock_Risk_Level").alias("stock_risk_level"),
+
+                F.col("_ingestion_timestamp").alias("ingestion_timestamp"),
+                F.col("_load_date").alias("load_date"),
+                F.col("_source_file").alias("source_file"),
+                F.col("_batch_id").alias("bronze_batch_id")
+            )
+            .withColumn(
+                "year_month",
+                F.concat_ws("-", F.col("year"), F.lpad(F.col("month"), 2, "0"))
+            )
+            .withColumn(
+                "silver_processed_at",
+                F.current_timestamp()
             )
         )
+
         return df
 
-    def _build_monitoring_output(self, df: DataFrame) -> DataFrame:
-        logger.info("Building monitoring output DataFrame (serverless-compatible)")
-        window_latest = Window.orderBy(F.col("execution_date").desc())
-        df_latest = (
-            df
-            .withColumn("_rank", F.row_number().over(window_latest))
-            .filter(F.col("_rank") == 1)
-            .drop("_rank")
-        )
-        df_latest = df_latest.withColumn(
-            "monitoring_summary",
-            F.when(
-                F.col("dataset_health_status") == "CRITICAL",
-                F.concat(
-                    F.lit("CRITICAL: Data quality risk detected. "),
-                    F.lit("Valid %: "), F.round(F.col("valid_percentage"), 2).cast("string"), F.lit("%. "),
-                    F.lit("Critical violations: "), F.col("critical_violations").cast("string"), F.lit(". "),
-                    F.lit("Immediate action required.")
-                )
-            ).when(
-                F.col("dataset_health_status") == "DEGRADED",
-                F.concat(
-                    F.lit("DEGRADED: Quality issues detected. "),
-                    F.lit("Major violations: "), F.col("major_violations").cast("string"), F.lit(". "),
-                    F.lit("Monitor and address violations.")
-                )
-            ).otherwise(
-                F.concat(
-                    F.lit("HEALTHY: Dataset quality is good. "),
-                    F.lit("Valid %: "), F.round(F.col("valid_percentage"), 2).cast("string"), F.lit("%.")
-                )
-            )
-        )
-        return df_latest.select(
-            "execution_date",
-            "dataset_health_status",
-            "valid_percentage",
-            "total_records",
-            "valid_records",
-            "critical_violations",
-            "major_violations",
-            "minor_violations",
-            "business_key_violations",
-            "coordinates_violations",
-            "domain_violations",
-            "logic_violations",
-            "temporal_violations",
-            "has_critical_alert",
-            "has_degraded_alert",
-            "has_business_key_alert",
-            "has_coordinates_alert",
-            "has_domain_alert",
-            "has_logic_alert",
-            "has_temporal_alert",
-            "detailed_alerts_count",
-            "has_trend_warning",
-            "valid_pct_ma7",
-            "critical_ma7",
-            "monitoring_summary"
-        )
+    # -----------------------------------------------------------------
+    # Upsert (Idempotent)
+    # -----------------------------------------------------------------
+    def _merge(self, df: DataFrame):
+        logger.info(f"Upserting into Silver fact table: {self.target_table}")
 
-    def _write_monitoring_table(self, df: DataFrame):
-        logger.info(f"Writing monitoring output to {self.monitoring_table}")
-        df.write.format("delta").mode("append").partitionBy("execution_date").option("mergeSchema", "true").saveAsTable(self.monitoring_table)
+        df.createOrReplaceTempView("source_fact_sell_in")
 
-    def run(self) -> DataFrame:
-        logger.info("Starting MonitoringDimPDV run (serverless-optimized)")
+        merge_sql = f"""
+        MERGE INTO {self.target_table} AS target
+        USING source_fact_sell_in AS source
+        ON
+            target.pdv_code = source.pdv_code
+            AND target.product_code = source.product_code
+            AND target.year_month = source.year_month
+        WHEN MATCHED THEN UPDATE SET
+            opening_stock_units = source.opening_stock_units,
+            sell_in_units = source.sell_in_units,
+            returns_units = source.returns_units,
+            closing_stock_units = source.closing_stock_units,
+            days_of_inventory = source.days_of_inventory,
+            inventory_turnover = source.inventory_turnover,
+            replenishment_flag = source.replenishment_flag,
+            stock_risk_level = source.stock_risk_level,
+            ingestion_timestamp = source.ingestion_timestamp,
+            load_date = source.load_date,
+            source_file = source.source_file,
+            bronze_batch_id = source.bronze_batch_id,
+            silver_processed_at = source.silver_processed_at
+        WHEN NOT MATCHED THEN INSERT *
+        """
+
+        self.spark.sql(merge_sql)
+
+    # -----------------------------------------------------------------
+    # Run
+    # -----------------------------------------------------------------
+    def run(self) -> None:
+        logger.info("Starting SilverFactSellIn transformation")
+
         try:
-            df_metrics = self._read_metrics()
-            df_health = self._evaluate_health_status(df_metrics)
-            df_detailed = self._evaluate_detailed_metrics(df_health)
-            df_trends = self._detect_trends(df_detailed)
-            df_monitoring = self._build_monitoring_output(df_trends)
-            self._write_monitoring_table(df_monitoring)
-            logger.info("MonitoringDimPDV run complete")
-            return df_monitoring
+            df_bronze = self._read_bronze()
+            df_silver = self._transform(df_bronze)
+            self._merge(df_silver)
+
+            logger.info("SilverFactSellIn transformation completed successfully")
+
         except Exception as e:
-            logger.error(f"Critical error in MonitoringDimPDV: {e}", exc_info=True)
+            logger.error(f"Critical error in SilverFactSellInTransformer: {e}", exc_info=True)
             raise
 
-def run_monitoring_dim_pdv(
+
+# ---------------------------------------------------------------------
+# Orchestration entrypoint (same pattern as MonitoringDimPDV)
+# ---------------------------------------------------------------------
+def run_silver_fact_sell_in(
     spark: SparkSession = None,
-    metrics_table: str = "workspace.silver.validation_dim_pdv_metrics",
-    monitoring_table: str = "workspace.silver.monitoring_dim_pdv"
-) -> DataFrame:
+    source_table: str = "workspace.bronze.sell_in",
+    target_table: str = "workspace.silver.fact_sell_in"
+):
     """
-    Runs the MonitoringDimPDV for orchestration or local testing.
-    
-    Args:
-        spark: SparkSession instance. If None, creates a new one (for local testing).
-        metrics_table: Fully qualified name of the validation metrics table.
-        monitoring_table: Fully qualified name of the monitoring output table.
-    
-    Returns:
-        DataFrame: Monitoring results with health status and alerts.
-    
-    Example:
-        # In Databricks notebook
-        monitoring_df = run_monitoring_dim_pdv(spark)
-        
-        # For local testing
-        monitoring_df = run_monitoring_dim_pdv()
+    Orchestration-friendly entrypoint.
     """
+
     local_spark = False
     if spark is None:
         spark = SparkSession.builder.getOrCreate()
         local_spark = True
-    monitor = MonitoringDimPDV(
+
+    transformer = SilverFactSellInTransformer(
         spark=spark,
-        metrics_table=metrics_table,
-        monitoring_table=monitoring_table
+        source_table=source_table,
+        target_table=target_table
     )
-    monitoring_df = monitor.run()
+
+    transformer.run()
+
     if local_spark:
-        logger.info("Monitoring finished in local mode.")
-    return monitoring_df
+        logger.info("SilverFactSellIn finished in local mode.")
+
 
 if __name__ == "__main__":
-    # Local test/demo run
-    logger.info("Running MonitoringDimPDV in standalone mode")
-    df = run_monitoring_dim_pdv()
-    df.show(truncate=False)
+    logger.info("Running SilverFactSellIn in standalone mode")
+    run_silver_fact_sell_in()

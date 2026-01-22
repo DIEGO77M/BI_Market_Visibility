@@ -1,3 +1,4 @@
+
 """
 Silver Fact Table Validation Script: Sell-In
 Author: Diego Mayorga
@@ -18,7 +19,22 @@ Validation Scope:
     - Returns structured metrics for orchestration and audit
 """
 
+# --- Robust import path handling for local and orchestrator execution ---
+import os
+import sys
+import inspect
 
+# --- Ensure src/ is in sys.path for module imports ---
+try:
+    _base_path = os.path.dirname(__file__)
+except NameError:
+    _base_path = os.path.dirname(inspect.getfile(inspect.currentframe()))
+_src_path = os.path.abspath(os.path.join(_base_path, '../..'))
+if _src_path not in sys.path:
+    sys.path.insert(0, _src_path)
+
+
+# --- Delayed imports for PySpark and dependencies ---
 import time
 import datetime
 import logging
@@ -47,9 +63,7 @@ EXPECTED_SCHEMA = [
     ("silver_batch_id", "string")
 ]
 
-
 FACT_TABLE = "silver.fact_sell_in"
-
 
 # Custom exception for validation errors
 class ValidationError(Exception):
@@ -158,7 +172,6 @@ class SilverFactSellInValidator:
         flag_failures = validation_agg["flag_failures"]
         lineage_failures = validation_agg["lineage_failures"]
 
-
         temporal_check = "PASS" if temporal_failures == 0 else "FAIL"
         if temporal_check == "FAIL":
             failed_validations += 1
@@ -199,7 +212,7 @@ class SilverFactSellInValidator:
             "status": status,
             "duration_seconds": round(time.time() - start, 2)
         }
-        
+
         # Always log validation summary for audit and monitoring
         self.logger.info(
             f"Validation completed: status={status}, total_records={total_records}, "
@@ -210,9 +223,16 @@ class SilverFactSellInValidator:
             raise ValidationError(f"Validation failed: {validation_results}")
         return result
 
+# Public function for orchestrators and testing (standardized signature)
+def run_silver_fact_sell_in_validation(spark: SparkSession) -> dict:
+    """
+    Runs the Silver Sell-In fact table validation pipeline.
+    Returns a structured result dict for monitoring and audit.
+    """
+    validator = SilverFactSellInValidator(spark)
+    return validator.validate()
 
 if __name__ == "__main__":
     spark = SparkSession.builder.getOrCreate()
-    validator = SilverFactSellInValidator(spark)
-    result = validator.validate()
+    result = run_silver_fact_sell_in_validation(spark)
     print(result)
