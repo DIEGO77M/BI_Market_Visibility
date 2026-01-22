@@ -26,17 +26,24 @@ logger.setLevel(logging.INFO)
 
 class SilverPriceAuditTransformer:
     """Transforms bronze price audit table to silver fact table with idempotent MERGE."""
+    
     @staticmethod
-    def _write_audit_log(spark: SparkSession, audit_dict: dict, table_name: str = "workspace.silver.transformation_audit_log"):
+    def _write_audit_log(spark: SparkSession, audit_dict: dict, table_name: str = "workspace.silver.transformation_audit_log", enabled: bool = True):
         """
         Persists the transformation execution result as a single-row Delta table entry for external consumption (e.g., n8n).
         Table is created if it does not exist. Schema is flexible for audit/monitoring use cases.
+        If enabled=False, does nothing (for local testing).
         """
+        if not enabled:
+            logger.info("Audit log write disabled (local testing mode)")
+            return
         from pyspark.sql import Row
         audit_row = Row(**audit_dict)
         audit_df = spark.createDataFrame([audit_row])
         # Create or append to audit log table
         audit_df.write.format("delta").mode("append").saveAsTable(table_name)
+        logger.info(f"Audit log persisted to {table_name}")
+    
     @staticmethod
     def _normalize_boolean(col_name: str) -> F.Column:
         """
@@ -48,6 +55,7 @@ class SilverPriceAuditTransformer:
             F.upper(F.trim(F.col(col_name))).isin(["SÍ", "SI", "YES", "Y", "1", "TRUE"]),
             True
         ).otherwise(False)
+    
     def _deduplicate(self, df: DataFrame) -> DataFrame:
         """
         Deduplicates records by natural business keys (pdv_code, product_code, date), keeping only the latest by _ingestion_timestamp.
@@ -58,6 +66,7 @@ class SilverPriceAuditTransformer:
         from pyspark.sql import Window
         w = Window.partitionBy(self.natural_keys).orderBy(F.col("_ingestion_timestamp").desc())
         return df.withColumn("_rn", F.row_number().over(w)).filter(F.col("_rn") == 1).drop("_rn")
+    
     def _validate_schema(self, df: DataFrame) -> None:
         """
         Validates the minimum schema contract:
@@ -78,9 +87,7 @@ class SilverPriceAuditTransformer:
             ).limit(1).collect()
         except Exception as e:
             raise ValueError(f"Type validation failed for price fields: {e}")
-    """
-    Transforms the bronze price audit table to the silver fact table.
-    """
+    
     def __init__(self, spark: SparkSession, config: Optional[dict] = None):
         self.spark = spark
         self.config = config or {}
@@ -222,7 +229,7 @@ class SilverPriceAuditTransformer:
         Trade-off: Only logs schema mismatch; does not auto-evolve schema to avoid silent errors.
         """
         logger.info(f"Ensuring target table exists and is compatible: {self.target_table}")
-        table_exists = self.spark._jsparkSession.catalog().tableExists(self.target_table)
+        table_exists = self.spark.catalog.tableExists(self.target_table)
         if not table_exists:
             logger.info("Target table does not exist. Creating Delta table.")
             (
@@ -273,7 +280,7 @@ class SilverPriceAuditTransformer:
         """
         Orchestrates the full Silver transformation pipeline for Price Audit.
         Returns detailed execution metrics for monitoring and audit.
-        Also persists the result in a Delta audit log table for external consumption (e.g., n8n).
+        Also persists the result in a Delta audit log table for external consumption (e.g., n8n), unless disabled for local testing.
         """
         start = time.time()
         execution_timestamp = datetime.utcnow().isoformat()
@@ -282,16 +289,18 @@ class SilverPriceAuditTransformer:
         status = "SUCCESS"
         silver_batch_id = None
         audit_log_table = "workspace.silver.transformation_audit_log"
+        # Allow disabling audit log for local testing
+        write_audit_log = self.config.get("write_audit_log", True)
         try:
             df = self._read_bronze()
             records_read = df.count()
-            df = self._deduplicate(df)
             df = self._standardize_columns(df)
+            df = self._deduplicate(df)
             df = self._cast_types(df)
-            # Capture batch_id for audit before merge
+            df = self._add_audit_fields(df)
+            # Capture batch_id for audit after adding audit fields
             if "silver_batch_id" in df.columns:
                 silver_batch_id = df.select("silver_batch_id").first()[0]
-            df = self._add_audit_fields(df)
             df = self._select_final_schema(df)
             self._ensure_silver_table(df)
             try:
@@ -317,12 +326,13 @@ class SilverPriceAuditTransformer:
             "error_message": error_message,
             "silver_batch_id": silver_batch_id,
         }
-        # Persist audit log for external consumption (e.g., n8n)
+        # Persist audit log for external consumption (e.g., n8n), only if enabled
         try:
-            self._write_audit_log(self.spark, result, audit_log_table)
+            self._write_audit_log(self.spark, result, audit_log_table, enabled=write_audit_log)
         except Exception as log_exc:
             logger.error(f"Failed to persist audit log to {audit_log_table}: {log_exc}")
         return result
+
 
 def run_price_audit_transformation(
     spark: SparkSession, config: Optional[dict] = None
@@ -330,11 +340,74 @@ def run_price_audit_transformation(
     """
     Public orchestrator entrypoint for the Price Audit Silver transformation.
     Designed for Databricks Jobs and notebook orchestration.
+    
     Args:
         spark (SparkSession): Active Spark session
-        config (dict, optional): Configuration dictionary (source/target overrides, etc.)
+        config (dict, optional): Configuration dictionary.
+            - source_table: Source Bronze table (default: workspace.bronze.price_audit)
+            - target_table: Target Silver table (default: workspace.silver.fact_price_audit)
+            - write_audit_log: Enable/disable audit log write (default: True)
+    
     Returns:
         dict: Execution metrics and audit fields for monitoring and troubleshooting
+    
+    Example:
+        # Production
+        result = run_price_audit_transformation(spark)
+        
+        # Local testing (disable audit log)
+        result = run_price_audit_transformation(spark, {"write_audit_log": False})
     """
     transformer = SilverPriceAuditTransformer(spark, config)
     return transformer.run()
+
+
+# ============================================================================
+# LOCAL TESTING ENTRYPOINT
+# ============================================================================
+if __name__ == "__main__":
+    """
+    Local testing entrypoint. Allows direct execution for debugging.
+    - Disables audit log writes (local testing mode)
+    - Prints execution metrics for visibility
+    - Does NOT execute when imported by orchestrator
+    """
+    print("\n" + "="*70)
+    print("LOCAL TESTING MODE - Price Audit Silver Transformation")
+    print("="*70 + "\n")
+    
+    try:
+        # Get Spark session
+        spark = SparkSession.builder.appName("PriceAuditLocal").getOrCreate()
+        
+        # Config para testing local: desactiva audit log
+        local_config = {
+            "write_audit_log": False,  # No escribe a Delta tabla
+            # Puedes sobrescribir tablas si necesario:
+            # "source_table": "workspace.bronze.price_audit",
+            # "target_table": "workspace.silver.fact_price_audit"
+        }
+        
+        # Ejecuta la transformación
+        print("[INFO] Starting transformation...\n")
+        result = run_price_audit_transformation(spark, local_config)
+        
+        # Imprime resultados
+        print("\n" + "="*70)
+        print("TRANSFORMATION RESULTS")
+        print("="*70)
+        for key, value in result.items():
+            print(f"{key:.<30} {value}")
+        print("="*70 + "\n")
+        
+        # Status final
+        if result["status"] == "SUCCESS":
+            print(f"✅ SUCCESS: {result['records_written']} records written in {result['duration_seconds']}s")
+        else:
+            print(f"❌ FAILURE: {result['error_message']}")
+        
+        print("\n")
+        
+    except Exception as e:
+        print(f"\n❌ ERROR during local testing: {e}\n")
+        raise
