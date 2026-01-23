@@ -1,0 +1,108 @@
+# Silver Layer Orchestrator – Databricks Asset Bundle Workflow
+# Executes all Silver notebooks in strict business order, with full auditability and modularity.
+# Order: dim_pdv → dim_products → fact_sell_in → fact_price_audit
+# Senior-level orchestration: idempotent, modular, observable, and ready for CI/CD.
+
+version: 1.0
+name: Master_Silver_Orchestrator
+
+# ============================================================================
+# CLUSTER CONFIGURATION - SERVERLESS (NO node_type_id/num_workers required)
+# ============================================================================
+job_clusters:
+  - job_cluster_key: silver_serverless
+    new_cluster:
+      spark_version: "15.4.x-scala2.12"
+      data_security_mode: SINGLE_USER
+      runtime_engine: SERVERLESS
+
+# ============================================================================
+# GLOBAL JOB CONFIGURATION
+# ============================================================================
+max_concurrent_runs: 1  # Prevent parallel execution, ensure sequential order
+timeout_seconds: 28800  # 8 hours total for entire pipeline
+tags:
+  layer: "silver"
+  domain: "medallion_architecture"
+  frequency: "daily"
+  owner: "data-engineering"
+
+# ============================================================================
+# TASKS - SEQUENTIAL EXECUTION WITH DEPENDENCIES
+# ============================================================================
+tasks:
+  # Task 1: Silver Dimension PDV (No dependencies - root task)
+  - task_key: silver_dim_pdv
+    description: "Run Silver Dimension PDV Orchestrator - Loads point of sale master data"
+    notebook_task:
+      notebook_path: ../src/silver/notebooks/Orchestrate_Silver_dim_pdv.ipynb
+    job_cluster_key: silver_serverless
+    timeout_seconds: 7200
+    max_retries: 1
+    depends_on: []
+
+  # Task 2: Silver Dimension Products (Depends on dim_pdv)
+  - task_key: silver_dim_products
+    description: "Run Silver Dimension Products Orchestrator - Loads product master data"
+    notebook_task:
+      notebook_path: ../src/silver/notebooks/Orchestrate_Silver_dim_products.ipynb
+    job_cluster_key: silver_serverless
+    timeout_seconds: 7200
+    max_retries: 1
+    depends_on:
+      - task_key: silver_dim_pdv
+
+  # Task 3: Silver Fact Sell In (Depends on both dimensions)
+  - task_key: silver_fact_sell_in
+    description: "Run Silver Fact Sell In Orchestrator - Loads sell-in transactional data"
+    notebook_task:
+      notebook_path: ../src/silver/notebooks/Orchestrate_Silver_fact_sell_in.ipynb
+    job_cluster_key: silver_serverless
+    timeout_seconds: 7200
+    max_retries: 1
+    depends_on:
+      - task_key: silver_dim_pdv
+      - task_key: silver_dim_products
+
+  # Task 4: Silver Fact Price Audit (Depends on both dimensions)
+  - task_key: silver_fact_price_audit
+    description: "Run Silver Fact Price Audit Orchestrator - Loads price audit transactional data"
+    notebook_task:
+      notebook_path: ../src/silver/notebooks/Orchestrate_Silver_fact_price_audit.ipynb
+    job_cluster_key: silver_serverless
+    timeout_seconds: 7200
+    max_retries: 1
+    depends_on:
+      - task_key: silver_dim_pdv
+      - task_key: silver_dim_products
+
+# ============================================================================
+# NOTIFICATIONS - ALERTING ON FAILURE/SUCCESS
+# ============================================================================
+on_failure:
+  - email_notifications:
+      on_failure: ["data-engineering@company.com"]
+
+on_success:
+  - email_notifications:
+      on_success: ["data-engineering@company.com"]
+
+# ============================================================================
+# SCHEDULING (Optional - Uncomment to enable daily execution at 2 AM UTC)
+# ============================================================================
+# schedule:
+#   quartz_cron_expression: "0 2 * * ?"  # Daily at 02:00 UTC
+#   timezone_id: "UTC"
+#   pause_status: "UNPAUSED"
+
+# ============================================================================
+# ORCHESTRATION STANDARDS
+# ============================================================================
+# - Each notebook is modular, idempotent, and logs all outputs for auditability.
+# - Dependency order ensures all dimensions are ready before facts.
+# - Serverless runtime ensures cost-efficiency and automatic scaling.
+# - max_retries: 1 handles transient failures gracefully.
+# - max_concurrent_runs: 1 ensures sequential execution, prevents race conditions.
+# - All paths are relative to the bundle root for portability (CI/CD ready).
+# - Ready for integration with Databricks Jobs, CI/CD, and external monitoring.
+# - Extendable for Gold layer or downstream orchestration.

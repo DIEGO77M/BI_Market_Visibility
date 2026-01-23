@@ -5,15 +5,89 @@
 bundle:
   name: BI_Market_Visibility
 
+# ============================================================================
+# RESOURCES - Define all assets (jobs, pipelines, notebooks, etc.)
+# ============================================================================
+resources:
+  jobs:
+    silver_orchestrator:
+      name: Master_Silver_Orchestrator
+      max_concurrent_runs: 1
+      timeout_seconds: 28800
+      
+      tags:
+        layer: "silver"
+        domain: "medallion_architecture"
+        frequency: "daily"
+        owner: "Diego Mayorga"
+
+      # Schedule - Daily execution at 3 AM UTC (PAUSED)
+      schedule:
+        quartz_cron_expression: "0 0 3 * * ?"
+        timezone_id: "UTC"
+        pause_status: "PAUSED"
+
+      tasks:
+        # Task 1: Silver Dimension PDV
+        - task_key: silver_dim_pdv
+          description: "Run Silver Dimension PDV Orchestrator - Loads point of sale master data"
+          notebook_task:
+            notebook_path: /Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/src/silver/notebooks/Orchestrate_Silver_dim_pdv
+          timeout_seconds: 7200
+          max_retries: 1
+          depends_on: []
+
+        # Task 2: Silver Dimension Products
+        - task_key: silver_dim_products
+          description: "Run Silver Dimension Products Orchestrator - Loads product master data"
+          notebook_task:
+            notebook_path: /Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/src/silver/notebooks/Orchestrate_Silver_dim_products
+          timeout_seconds: 7200
+          max_retries: 1
+          depends_on:
+            - task_key: silver_dim_pdv
+
+        # Task 3: Silver Fact Sell In
+        - task_key: silver_fact_sell_in
+          description: "Run Silver Fact Sell In Orchestrator - Loads sell-in transactional data"
+          notebook_task:
+            notebook_path: /Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/src/silver/notebooks/Orchestrate_Silver_fact_sell_in
+          timeout_seconds: 7200
+          max_retries: 1
+          depends_on:
+            - task_key: silver_dim_pdv
+            - task_key: silver_dim_products
+
+        # Task 4: Silver Fact Price Audit
+        - task_key: silver_fact_price_audit
+          description: "Run Silver Fact Price Audit Orchestrator - Loads price audit transactional data"
+          notebook_task:
+            notebook_path: /Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/src/silver/notebooks/Orchestrate_Silver_fact_price_audit
+          timeout_seconds: 7200
+          max_retries: 1
+          depends_on:
+            - task_key: silver_dim_pdv
+            - task_key: silver_dim_products
+
+# ============================================================================
+# TARGETS - Environment configurations
+# ============================================================================
 targets:
   dev:
-    mode: development
+    mode: production
     default: true
     workspace:
       host: https://dbc-fd5c2cc6-9b83.cloud.databricks.com
+      root_path: /Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/${bundle.name}/${bundle.target}
 
-  ## Optionally, there could be 'staging' or 'prod' targets here.
-  #
+  ## Optional: Staging environment
+  # staging:
+  #   mode: production
+  #   workspace:
+  #     host: https://dbc-fd5c2cc6-9b83.cloud.databricks.com
+  #     root_path: /Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/${bundle.name}/${bundle.target}
+  ## Optional: Production environment
   # prod:
+  #   mode: production
   #   workspace:
   #     host: https://dbc-fd5c2cc6-9b83.cloud.databricks.com
