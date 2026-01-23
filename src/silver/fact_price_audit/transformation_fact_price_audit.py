@@ -40,6 +40,8 @@ class SilverPriceAuditTransformer:
         from pyspark.sql import Row
         audit_row = Row(**audit_dict)
         audit_df = spark.createDataFrame([audit_row])
+        logger.info(f"[AUDIT] DataFrame to be written to {table_name}:")
+        audit_df.show(truncate=False)
         # Create or append to audit log table
         audit_df.write.format("delta").mode("append").saveAsTable(table_name)
         logger.info(f"Audit log persisted to {table_name}")
@@ -315,20 +317,23 @@ class SilverPriceAuditTransformer:
             error_message = str(e)
             status = "FAILURE"
         duration = round(time.time() - start, 2)
+        # Robust default dict for audit log
         result = {
-            "status": status,
-            "source_table": self.source_table,
-            "target_table": self.target_table,
-            "records_read": records_read,
-            "records_written": records_written,
+            "status": status or "FAILURE",
+            "source_table": self.source_table or "UNKNOWN",
+            "target_table": self.target_table or "UNKNOWN",
+            "records_read": records_read if records_read is not None else 0,
+            "records_written": records_written if records_written is not None else 0,
             "duration_seconds": duration,
-            "execution_timestamp": execution_timestamp,
-            "error_message": error_message,
-            "silver_batch_id": silver_batch_id,
+            "execution_timestamp": execution_timestamp or datetime.utcnow().isoformat(),
+            "error_message": error_message or "No error message captured.",
+            "silver_batch_id": silver_batch_id or "NO_BATCH_ID",
         }
+        logger.info(f"[AUDIT] Attempting to write audit log to {audit_log_table} with result: {result}")
         # Persist audit log for external consumption (e.g., n8n), only if enabled
         try:
             self._write_audit_log(self.spark, result, audit_log_table, enabled=write_audit_log)
+            logger.info(f"[AUDIT] Successfully wrote audit log to {audit_log_table}")
         except Exception as log_exc:
             logger.error(f"Failed to persist audit log to {audit_log_table}: {log_exc}")
         return result
