@@ -66,7 +66,9 @@ with_id AS (
         product_code,
         expected_flag,
         'store_size_strategy' AS assortment_reason,
-        CURRENT_DATE() AS valid_from_date,
+        -- For simulation/historical alignment: fix valid_from_date to 2021-01-01
+        -- This ensures all fact_pdv_monthly_health records (2021-2022) match expected assortment
+        DATE('2021-01-01') AS valid_from_date,
         TRUE AS is_current,
         CURRENT_TIMESTAMP() AS gold_processed_at,
         store_size
