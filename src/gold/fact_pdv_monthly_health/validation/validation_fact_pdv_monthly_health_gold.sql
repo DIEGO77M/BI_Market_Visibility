@@ -70,8 +70,13 @@ WITH validation_metrics AS (
         SUM(CASE WHEN data_confidence_score < 0.5 THEN 1 ELSE 0 END) AS low_quality_count,
         ROUND(AVG(data_confidence_score), 2) AS avg_confidence_score,
         
-        -- Potential stockout days
-        SUM(CASE WHEN COALESCE(closing_stock_units, 0) <= 0 AND potential_stockout_days IS NOT NULL THEN 1 ELSE 0 END) AS invalid_stockout_projection,
+
+        -- Inventory action signal distribution
+        SUM(CASE WHEN inventory_action_signal = 'STOCKOUT' THEN 1 ELSE 0 END) AS stockout_count,
+        SUM(CASE WHEN inventory_action_signal = 'URGENT_REPLENISHMENT' THEN 1 ELSE 0 END) AS urgent_replenishment_count,
+        SUM(CASE WHEN inventory_action_signal = 'REPLENISHMENT_SOON' THEN 1 ELSE 0 END) AS replenishment_soon_count,
+        SUM(CASE WHEN inventory_action_signal = 'PROMOTION_OR_STOP_SUPPLY' THEN 1 ELSE 0 END) AS promotion_or_stop_supply_count,
+        SUM(CASE WHEN inventory_action_signal = 'NO_ACTION' THEN 1 ELSE 0 END) AS no_action_count,
         
         -- Audit fields
         SUM(CASE WHEN silver_batch_id IS NULL OR gold_processed_at IS NULL THEN 1 ELSE 0 END) AS missing_audit_fields,
@@ -99,6 +104,9 @@ ref_integrity AS (
         -- dim_product
         SUM(CASE WHEN p.product_code IS NULL THEN 1 ELSE 0 END) AS orphan_products,
         
+        -- dim_expected_assortment (business key only)
+        SUM(CASE WHEN ea.assortment_id IS NULL THEN 1 ELSE 0 END) AS orphan_expected_assortment,
+        
         -- Totals
         COUNT(*) AS total_for_ref_check
         
@@ -106,6 +114,7 @@ ref_integrity AS (
     LEFT JOIN workspace.gold.dim_date d ON f.date = d.date_id
     LEFT JOIN workspace.gold.dim_pdv dp ON f.pdv_code = dp.pdv_code
     LEFT JOIN workspace.gold.dim_product p ON f.product_code = p.product_code
+    LEFT JOIN workspace.gold.dim_expected_assortment ea ON f.pdv_code = ea.pdv_code AND f.product_code = ea.product_code AND ea.is_current = TRUE
 )
 
 -- =========================
@@ -384,20 +393,25 @@ FROM validation_metrics vm
 
 UNION ALL
 
--- 12. POTENTIAL STOCKOUT DAYS VALIDATION
+
+-- 12. INVENTORY ACTION SIGNAL DISTRIBUTION
 SELECT 
     uuid() AS validation_id,
-    'potential_stockout_days_logic' AS validation_name,
+    'inventory_action_signal_distribution' AS validation_name,
     'business_logic' AS validation_category,
-    CASE WHEN vm.invalid_stockout_projection = 0 THEN 'PASS' ELSE 'FAIL' END AS status,
-    CASE WHEN vm.invalid_stockout_projection = 0 THEN 'INFO' ELSE 'MEDIUM' END AS severity,
+    'INFO' AS status,
+    'INFO' AS severity,
     vm.total_records AS total_rows,
-    vm.invalid_stockout_projection AS failed_rows,
-    ROUND(vm.invalid_stockout_projection * 100.0 / NULLIF(vm.total_records, 0), 2) AS failed_percentage,
-    CAST(vm.invalid_stockout_projection AS STRING) AS metric_value,
-    '0' AS threshold_value,
-    CONCAT('Records with no stock but stockout projection: ', CAST(vm.invalid_stockout_projection AS STRING)) AS details,
-    CASE WHEN vm.invalid_stockout_projection > 0 THEN 'Review potential_stockout_days CASE logic in DML' ELSE 'No action required' END AS recommended_action,
+    0 AS failed_rows,
+    0.0 AS failed_percentage,
+    CONCAT('STOCKOUT: ', CAST(vm.stockout_count AS STRING),
+           ' | URGENT_REPLENISHMENT: ', CAST(vm.urgent_replenishment_count AS STRING),
+           ' | REPLENISHMENT_SOON: ', CAST(vm.replenishment_soon_count AS STRING),
+           ' | PROMOTION_OR_STOP_SUPPLY: ', CAST(vm.promotion_or_stop_supply_count AS STRING),
+           ' | NO_ACTION: ', CAST(vm.no_action_count AS STRING)) AS metric_value,
+    'N/A' AS threshold_value,
+    'Distribution of inventory_action_signal for business monitoring' AS details,
+    'No action required' AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
     NULL AS date,
     vm.current_batch_id AS silver_batch_id

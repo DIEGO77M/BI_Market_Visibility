@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS workspace.gold.fact_pdv_monthly_health (
     -- =========================
     closing_stock_units INT COMMENT 'End-of-month stock units',
     days_of_inventory INT COMMENT 'Estimated number of inventory days available',
-    potential_stockout_days INT COMMENT 'Projection: number of days until stockout',
+    inventory_action_signal STRING COMMENT 'Stock action signal based on inventory and risk level',
 
     -- =========================
     -- In-store Execution

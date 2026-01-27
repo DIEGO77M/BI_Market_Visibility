@@ -28,13 +28,15 @@ WITH base_monthly_health AS (
         si.closing_stock_units,
         si.days_of_inventory,
 
-        -- Projected days to stock-out
+
+        -- Inventory Action Signal
         CASE
-            WHEN si.closing_stock_units > 0
-             AND si.days_of_inventory IS NOT NULL
-            THEN CAST(ROUND(si.days_of_inventory * 1.0, 0) AS INT)
-            ELSE 0
-        END AS potential_stockout_days,
+            WHEN si.closing_stock_units = 0 THEN 'STOCKOUT'
+            WHEN si.days_of_inventory <= 15 THEN 'URGENT_REPLENISHMENT'
+            WHEN si.days_of_inventory BETWEEN 16 AND 30 THEN 'REPLENISHMENT_SOON'
+            WHEN si.stock_risk_level = 'OVERSTOCK' THEN 'PROMOTION_OR_STOP_SUPPLY'
+            ELSE 'NO_ACTION'
+        END AS inventory_action_signal,
 
         -- =====================================================
         -- Execution Metrics (PDV-level attributes)
@@ -89,11 +91,10 @@ WITH base_monthly_health AS (
         ON dp.pdv_code = si.pdv_code
        AND dp.is_active = TRUE
 
-    -- Expected assortment (point-in-time logic)
+    -- Expected assortment (business key join only for simulation)
     LEFT JOIN workspace.gold.dim_expected_assortment ea
         ON ea.pdv_code = si.pdv_code
        AND ea.product_code = si.product_code
-       AND ea.valid_from_date = MAKE_DATE(si.year, si.month, 1)
        AND ea.is_current = TRUE
 )
 INSERT OVERWRITE workspace.gold.fact_pdv_monthly_health
@@ -105,7 +106,7 @@ SELECT
 
     closing_stock_units,
     days_of_inventory,
-    potential_stockout_days,
+    inventory_action_signal,
 
     merchandiser_executed,
     has_planogram_active,
