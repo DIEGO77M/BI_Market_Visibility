@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS workspace.gold.validation_pdv_monthly_health (
     details STRING COMMENT 'Human-readable validation details',
     recommended_action STRING COMMENT 'Suggested remediation action',
     execution_timestamp TIMESTAMP COMMENT 'When validation was executed',
-    year_month_id INT COMMENT 'Month being validated (if applicable)',
+    date DATE COMMENT 'Month being validated (if applicable)',
     silver_batch_id STRING COMMENT 'Source batch ID'
 )
 USING DELTA
@@ -45,10 +45,10 @@ WITH validation_metrics AS (
         COUNT(*) AS total_records,
         
         -- Primary key uniqueness
-        COUNT(*) - COUNT(DISTINCT year_month_id, pdv_code, product_code) AS duplicate_keys,
+        COUNT(*) - COUNT(DISTINCT date, pdv_code, product_code) AS duplicate_keys,
         
         -- NULL business keys
-        SUM(CASE WHEN year_month_id IS NULL OR pdv_code IS NULL OR product_code IS NULL THEN 1 ELSE 0 END) AS null_keys,
+        SUM(CASE WHEN date IS NULL OR pdv_code IS NULL OR product_code IS NULL THEN 1 ELSE 0 END) AS null_keys,
         
         -- Stock logic
         SUM(CASE 
@@ -78,7 +78,7 @@ WITH validation_metrics AS (
         
         -- Batch info
         MAX(silver_batch_id) AS current_batch_id,
-        COUNT(DISTINCT year_month_id) AS months_processed,
+        COUNT(DISTINCT date) AS months_processed,
         COUNT(DISTINCT pdv_code) AS pdvs_processed,
         COUNT(DISTINCT product_code) AS products_processed
         
@@ -91,7 +91,7 @@ WITH validation_metrics AS (
 ref_integrity AS (
     SELECT
         -- dim_date
-        COUNT(DISTINCT f.year_month_id) - COUNT(DISTINCT d.year_month) AS orphan_dates,
+        COUNT(DISTINCT f.date) - COUNT(DISTINCT d.date_id) AS orphan_dates,
         
         -- dim_pdv
         SUM(CASE WHEN dp.pdv_code IS NULL THEN 1 ELSE 0 END) AS orphan_pdvs,
@@ -103,7 +103,7 @@ ref_integrity AS (
         COUNT(*) AS total_for_ref_check
         
     FROM workspace.gold.fact_pdv_monthly_health f
-    LEFT JOIN workspace.gold.dim_date d ON f.year_month_id = d.year_month
+    LEFT JOIN workspace.gold.dim_date d ON f.date = d.date_id
     LEFT JOIN workspace.gold.dim_pdv dp ON f.pdv_code = dp.pdv_code
     LEFT JOIN workspace.gold.dim_product p ON f.product_code = p.product_code
 )
@@ -128,7 +128,7 @@ SELECT
     CONCAT('Total records loaded: ', CAST(vm.total_records AS STRING)) AS details,
     CASE WHEN vm.total_records = 0 THEN 'Check source data in silver.fact_sell_in' ELSE 'No action required' END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
-    NULL AS year_month_id,
+    NULL AS date,
     vm.current_batch_id AS silver_batch_id
 FROM validation_metrics vm
 
@@ -149,7 +149,7 @@ SELECT
     CONCAT('Duplicate records found: ', CAST(vm.duplicate_keys AS STRING)) AS details,
     CASE WHEN vm.duplicate_keys > 0 THEN 'Review MERGE logic in DML - check ON clause keys' ELSE 'No action required' END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
-    NULL AS year_month_id,
+    NULL AS date,
     vm.current_batch_id AS silver_batch_id
 FROM validation_metrics vm
 
@@ -170,7 +170,7 @@ SELECT
     CONCAT('Records with NULL business keys: ', CAST(vm.null_keys AS STRING)) AS details,
     CASE WHEN vm.null_keys > 0 THEN 'Check JOIN conditions with dim_date in DML' ELSE 'No action required' END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
-    NULL AS year_month_id,
+    NULL AS date,
     vm.current_batch_id AS silver_batch_id
 FROM validation_metrics vm
 
@@ -191,7 +191,7 @@ SELECT
     CONCAT('Year-month values not found in dim_date: ', CAST(ri.orphan_dates AS STRING)) AS details,
     CASE WHEN ri.orphan_dates > 0 THEN 'Refresh dim_date or check year/month values in fact_sell_in' ELSE 'No action required' END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
-    NULL AS year_month_id,
+    NULL AS date,
     (SELECT current_batch_id FROM validation_metrics) AS silver_batch_id
 FROM ref_integrity ri
 
@@ -225,7 +225,7 @@ SELECT
         ELSE 'No action required' 
     END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
-    NULL AS year_month_id,
+    NULL AS date,
     (SELECT current_batch_id FROM validation_metrics) AS silver_batch_id
 FROM ref_integrity ri
 
@@ -246,7 +246,7 @@ SELECT
     CONCAT('Products not found in dim_product: ', CAST(ri.orphan_products AS STRING)) AS details,
     CASE WHEN ri.orphan_products > 0 THEN 'Review and add missing products to dim_product' ELSE 'No action required' END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
-    NULL AS year_month_id,
+    NULL AS date,
     (SELECT current_batch_id FROM validation_metrics) AS silver_batch_id
 FROM ref_integrity ri
 
@@ -267,7 +267,7 @@ SELECT
     CONCAT('Records with inconsistent in_stock vs closing_stock_units: ', CAST(vm.stock_logic_errors AS STRING)) AS details,
     CASE WHEN vm.stock_logic_errors > 0 THEN 'Review in_stock CASE logic in DML' ELSE 'No action required' END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
-    NULL AS year_month_id,
+    NULL AS date,
     vm.current_batch_id AS silver_batch_id
 FROM validation_metrics vm
 
@@ -288,7 +288,7 @@ SELECT
     CONCAT('Records with inconsistent coverage_compliant logic: ', CAST(vm.compliance_logic_errors AS STRING)) AS details,
     CASE WHEN vm.compliance_logic_errors > 0 THEN 'Review coverage_compliant CASE logic in DML' ELSE 'No action required' END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
-    NULL AS year_month_id,
+    NULL AS date,
     vm.current_batch_id AS silver_batch_id
 FROM validation_metrics vm
 
@@ -310,7 +310,7 @@ SELECT
            ' | Avg score: ', CAST(vm.avg_confidence_score AS STRING)) AS details,
     CASE WHEN vm.score_out_of_range > 0 THEN 'Review data_confidence_score CAST in DML' ELSE 'No action required' END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
-    NULL AS year_month_id,
+    NULL AS date,
     vm.current_batch_id AS silver_batch_id
 FROM validation_metrics vm
 
@@ -344,7 +344,7 @@ SELECT
         ELSE 'No action required' 
     END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
-    NULL AS year_month_id,
+    NULL AS date,
     vm.current_batch_id AS silver_batch_id
 FROM validation_metrics vm
 
@@ -378,7 +378,7 @@ SELECT
         ELSE 'No action required' 
     END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
-    NULL AS year_month_id,
+    NULL AS date,
     vm.current_batch_id AS silver_batch_id
 FROM validation_metrics vm
 
@@ -399,7 +399,7 @@ SELECT
     CONCAT('Records with no stock but stockout projection: ', CAST(vm.invalid_stockout_projection AS STRING)) AS details,
     CASE WHEN vm.invalid_stockout_projection > 0 THEN 'Review potential_stockout_days CASE logic in DML' ELSE 'No action required' END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
-    NULL AS year_month_id,
+    NULL AS date,
     vm.current_batch_id AS silver_batch_id
 FROM validation_metrics vm
 
@@ -420,7 +420,7 @@ SELECT
     CONCAT('Records with missing audit fields: ', CAST(vm.missing_audit_fields AS STRING)) AS details,
     CASE WHEN vm.missing_audit_fields > 0 THEN 'Review silver_batch_id and gold_processed_at in DML' ELSE 'No action required' END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
-    NULL AS year_month_id,
+    NULL AS date,
     vm.current_batch_id AS silver_batch_id
 FROM validation_metrics vm
 

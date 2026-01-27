@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS workspace.gold.fact_pdv_monthly_health (
     -- =========================
     -- Business Keys
     -- =========================
-    year_month_id INT COMMENT 'Logical FK to dim_date.year_month',
+    date DATE COMMENT 'Logical FK to dim_date.date (first day of month, monthly grain)',
     pdv_code STRING COMMENT 'Logical FK to dim_pdv.pdv_code',
     product_code STRING COMMENT 'Logical FK to dim_product.product_code',
     expected_assortment_id INT COMMENT 'Logical FK to dim_expected_assortment.assortment_id',
@@ -47,5 +47,5 @@ CREATE TABLE IF NOT EXISTS workspace.gold.fact_pdv_monthly_health (
     gold_processed_at TIMESTAMP COMMENT 'Gold layer processing timestamp'
 )
 USING DELTA
-PARTITIONED BY (year_month_id)
+PARTITIONED BY (date)
 COMMENT 'Monthly snapshot of PDV–Product health, including stock, execution, compliance, and data quality';

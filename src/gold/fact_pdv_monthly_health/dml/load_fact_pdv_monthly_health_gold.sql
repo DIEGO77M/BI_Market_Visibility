@@ -6,34 +6,17 @@
 -- dim_date is a daily-grain dimension. This CTE reduces it to a
 -- unique monthly reference to avoid row multiplication.
 -- ============================================================================
-
-WITH dim_month AS (
-    SELECT
-        year_month       AS year_month_id,
-        year,
-        month
-    FROM workspace.gold.dim_date
-    GROUP BY
-        year_month,
-        year,
-        month
-),
-
--- ============================================================================
--- Step 1: Build monthly PDV × Product health snapshot
--- Purpose:
--- Join all dimensions at the same grain and compute business,
--- execution, compliance and audit attributes.
--- Guaranteed output grain:
---   1 row per (year_month, pdv_code, product_code)
+-- Step 1 & 2: Build and Load monthly PDV × Product health snapshot
+-- Purpose: Deterministic monthly snapshot load. INSERT OVERWRITE guarantees idempotency and no duplicates.
+-- The CTE must be immediately before the INSERT OVERWRITE for correct SQL syntax.
 -- ============================================================================
 
-base_monthly_health AS (
+WITH base_monthly_health AS (
     SELECT
         -- =====================================================
         -- Business Keys
         -- =====================================================
-        dm.year_month_id,
+        MAKE_DATE(si.year, si.month, 1) AS date,
         si.pdv_code,
         si.product_code,
 
@@ -97,11 +80,6 @@ base_monthly_health AS (
 
     FROM workspace.silver.fact_sell_in si
 
-    -- Temporal alignment (monthly grain)
-    INNER JOIN dim_month dm
-        ON dm.year = si.year
-       AND dm.month = si.month
-
     -- Mandatory dimensions
     INNER JOIN workspace.gold.dim_product pr
         ON pr.product_code = si.product_code
@@ -115,20 +93,12 @@ base_monthly_health AS (
     LEFT JOIN workspace.gold.dim_expected_assortment ea
         ON ea.pdv_code = si.pdv_code
        AND ea.product_code = si.product_code
-       AND ea.valid_from_date <= LAST_DAY(MAKE_DATE(si.year, si.month, 1))
+       AND ea.valid_from_date = MAKE_DATE(si.year, si.month, 1)
        AND ea.is_current = TRUE
 )
-
--- ============================================================================
--- Step 2: Load Gold fact table
--- Purpose:
--- Deterministic monthly snapshot load.
--- INSERT OVERWRITE guarantees idempotency and no duplicates.
--- ============================================================================
-
 INSERT OVERWRITE workspace.gold.fact_pdv_monthly_health
 SELECT
-    year_month_id,
+    date,
     pdv_code,
     product_code,
     expected_assortment_id,
