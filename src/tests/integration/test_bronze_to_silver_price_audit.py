@@ -1,5 +1,5 @@
 """
-Integration test: Bronze → Silver Price Audit pipeline (Senior Level).
+Integration test: Bronze → Silver Price Audit pipeline.
 """
 import pytest
 from pyspark.sql import SparkSession, Row, functions as F

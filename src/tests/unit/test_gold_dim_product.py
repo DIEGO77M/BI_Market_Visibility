@@ -1,5 +1,5 @@
 """
-Unit tests for Gold dim_product logic (Senior Level).
+Unit tests for Gold dim_product logic.
 """
 import pytest
 from pyspark.sql import SparkSession, Row, functions as F
