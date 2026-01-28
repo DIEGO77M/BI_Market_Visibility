@@ -2,7 +2,7 @@
 -- Author: BI Market Visibility Project
 -- Description: Canonical fact table for Revenue Leakage analytics at PDV + Product + Date grain.
 
-CREATE TABLE gold.mart_revenue_leakage (
+CREATE TABLE IF NOT EXISTS gold.mart_revenue_leakage (
     -- =========================
     -- Business Keys
     -- =========================

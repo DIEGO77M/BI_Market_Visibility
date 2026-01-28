@@ -7,9 +7,6 @@
 -- Output: workspace.gold.validation_pdv_monthly_health
 -- ============================================================================
 
--- =========================
--- CREATE VALIDATION TABLE
--- =========================
 CREATE TABLE IF NOT EXISTS workspace.gold.validation_pdv_monthly_health (
     validation_id STRING COMMENT 'Unique validation execution ID',
     validation_name STRING COMMENT 'Validation test name',
@@ -35,10 +32,6 @@ COMMENT 'Validation results for automated monitoring and alerting';
 -- LOAD VALIDATION RESULTS
 -- ============================================================================
 INSERT OVERWRITE workspace.gold.validation_pdv_monthly_health
-
--- =========================
--- CTE: Validation metrics
--- =========================
 WITH validation_metrics AS (
     SELECT
         -- Row count
