@@ -253,6 +253,32 @@ LIMIT 50;
 
 ---
 
+
+## ❓ Why Materialized Tables Instead of Views?
+
+All KPIs in this Gold Layer are implemented as materialized Delta tables, not views. This is a deliberate architectural decision for enterprise analytics and Databricks Serverless compatibility.
+
+**Key reasons:**
+- Views recalculate all logic on every query, which is slow and expensive at scale.
+- Materialized tables enable monthly snapshots, auditability, and historical analysis.
+- Tables support physical optimizations (partitioning, ZORDER, Delta features) for fast BI/AI consumption.
+- Required for robust orchestration, data quality monitoring, and drift detection.
+- Compatible with downstream BI tools, workflows, and data products expecting physical tables.
+- Enable idempotent, deterministic, and auditable data pipelines (critical for business and compliance).
+
+**When to use views?**
+- For rapid prototyping, ad-hoc exploration, or very small datasets.
+- Not recommended for production, high-volume, or auditable analytics in this context.
+
+**Trade-offs:**
+- Views save storage and always show the latest data, but are not scalable for complex, multi-source KPIs.
+- Materialized tables require scheduled refresh, but deliver performance, governance, and reliability.
+
+**Conclusion:**
+Materialized Delta tables are the best practice for production-grade, auditable, and high-performance analytics in Databricks Serverless and enterprise BI environments.
+
+---
+
 ## 🔧 Technical Notes
 
 
