@@ -33,54 +33,36 @@ COMMENT 'Validation results for automated monitoring and alerting';
 -- ============================================================================
 INSERT OVERWRITE workspace.gold.validation_pdv_monthly_health
 WITH validation_metrics AS (
-    SELECT
-        -- Row count
-        COUNT(*) AS total_records,
-        
-        -- Primary key uniqueness
-        COUNT(*) - COUNT(DISTINCT date, pdv_code, product_code) AS duplicate_keys,
-        
-        -- NULL business keys
-        SUM(CASE WHEN date IS NULL OR pdv_code IS NULL OR product_code IS NULL THEN 1 ELSE 0 END) AS null_keys,
-        
-        -- Stock logic
-        SUM(CASE 
-            WHEN (closing_stock_units > 0 AND in_stock = FALSE) 
-              OR (COALESCE(closing_stock_units, 0) <= 0 AND in_stock = TRUE)
-            THEN 1 ELSE 0 
-        END) AS stock_logic_errors,
-        
-        -- Coverage compliance logic
-        SUM(CASE 
-            WHEN (in_stock = TRUE AND in_expected_assortment = TRUE AND coverage_compliant = FALSE)
-              OR (NOT (in_stock = TRUE AND in_expected_assortment = TRUE) AND coverage_compliant = TRUE)
-            THEN 1 ELSE 0 
-        END) AS compliance_logic_errors,
-        
-        -- Data confidence score
-        SUM(CASE WHEN data_confidence_score < 0.0 OR data_confidence_score > 1.0 THEN 1 ELSE 0 END) AS score_out_of_range,
-        SUM(CASE WHEN data_confidence_score = 0.2 THEN 1 ELSE 0 END) AS orphan_pdv_count,
-        SUM(CASE WHEN data_confidence_score < 0.5 THEN 1 ELSE 0 END) AS low_quality_count,
-        ROUND(AVG(data_confidence_score), 2) AS avg_confidence_score,
-        
-
-        -- Inventory action signal distribution
-        SUM(CASE WHEN inventory_action_signal = 'STOCKOUT' THEN 1 ELSE 0 END) AS stockout_count,
-        SUM(CASE WHEN inventory_action_signal = 'URGENT_REPLENISHMENT' THEN 1 ELSE 0 END) AS urgent_replenishment_count,
-        SUM(CASE WHEN inventory_action_signal = 'REPLENISHMENT_SOON' THEN 1 ELSE 0 END) AS replenishment_soon_count,
-        SUM(CASE WHEN inventory_action_signal = 'PROMOTION_OR_STOP_SUPPLY' THEN 1 ELSE 0 END) AS promotion_or_stop_supply_count,
-        SUM(CASE WHEN inventory_action_signal = 'NO_ACTION' THEN 1 ELSE 0 END) AS no_action_count,
-        
-        -- Audit fields
-        SUM(CASE WHEN silver_batch_id IS NULL OR gold_processed_at IS NULL THEN 1 ELSE 0 END) AS missing_audit_fields,
-        
-        -- Batch info
-        MAX(silver_batch_id) AS current_batch_id,
-        COUNT(DISTINCT date) AS months_processed,
-        COUNT(DISTINCT pdv_code) AS pdvs_processed,
-        COUNT(DISTINCT product_code) AS products_processed
-        
-    FROM workspace.gold.fact_pdv_monthly_health
+        SELECT
+                date,
+                COUNT(*) AS total_records,
+                COUNT(*) - COUNT(DISTINCT date, pdv_code, product_code) AS duplicate_keys,
+                SUM(CASE WHEN date IS NULL OR pdv_code IS NULL OR product_code IS NULL THEN 1 ELSE 0 END) AS null_keys,
+                SUM(CASE 
+                        WHEN (closing_stock_units > 0 AND in_stock = FALSE) 
+                            OR (COALESCE(closing_stock_units, 0) <= 0 AND in_stock = TRUE)
+                        THEN 1 ELSE 0 
+                END) AS stock_logic_errors,
+                SUM(CASE 
+                        WHEN (in_stock = TRUE AND in_expected_assortment = TRUE AND coverage_compliant = FALSE)
+                            OR (NOT (in_stock = TRUE AND in_expected_assortment = TRUE) AND coverage_compliant = TRUE)
+                        THEN 1 ELSE 0 
+                END) AS compliance_logic_errors,
+                SUM(CASE WHEN data_confidence_score < 0.0 OR data_confidence_score > 1.0 THEN 1 ELSE 0 END) AS score_out_of_range,
+                SUM(CASE WHEN data_confidence_score = 0.2 THEN 1 ELSE 0 END) AS orphan_pdv_count,
+                SUM(CASE WHEN data_confidence_score < 0.5 THEN 1 ELSE 0 END) AS low_quality_count,
+                ROUND(AVG(data_confidence_score), 2) AS avg_confidence_score,
+                SUM(CASE WHEN inventory_action_signal = 'STOCKOUT' THEN 1 ELSE 0 END) AS stockout_count,
+                SUM(CASE WHEN inventory_action_signal = 'URGENT_REPLENISHMENT' THEN 1 ELSE 0 END) AS urgent_replenishment_count,
+                SUM(CASE WHEN inventory_action_signal = 'REPLENISHMENT_SOON' THEN 1 ELSE 0 END) AS replenishment_soon_count,
+                SUM(CASE WHEN inventory_action_signal = 'PROMOTION_OR_STOP_SUPPLY' THEN 1 ELSE 0 END) AS promotion_or_stop_supply_count,
+                SUM(CASE WHEN inventory_action_signal = 'NO_ACTION' THEN 1 ELSE 0 END) AS no_action_count,
+                SUM(CASE WHEN silver_batch_id IS NULL OR gold_processed_at IS NULL THEN 1 ELSE 0 END) AS missing_audit_fields,
+                MAX(silver_batch_id) AS current_batch_id,
+                COUNT(DISTINCT pdv_code) AS pdvs_processed,
+                COUNT(DISTINCT product_code) AS products_processed
+        FROM workspace.gold.fact_pdv_monthly_health
+        GROUP BY date
 ),
 
 -- =========================
@@ -130,7 +112,7 @@ SELECT
     CONCAT('Total records loaded: ', CAST(vm.total_records AS STRING)) AS details,
     CASE WHEN vm.total_records = 0 THEN 'Check source data in silver.fact_sell_in' ELSE 'No action required' END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
-    NULL AS date,
+    vm.date AS date,
     vm.current_batch_id AS silver_batch_id
 FROM validation_metrics vm
 
@@ -151,7 +133,7 @@ SELECT
     CONCAT('Duplicate records found: ', CAST(vm.duplicate_keys AS STRING)) AS details,
     CASE WHEN vm.duplicate_keys > 0 THEN 'Review MERGE logic in DML - check ON clause keys' ELSE 'No action required' END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
-    NULL AS date,
+    vm.date AS date,
     vm.current_batch_id AS silver_batch_id
 FROM validation_metrics vm
 
@@ -172,7 +154,7 @@ SELECT
     CONCAT('Records with NULL business keys: ', CAST(vm.null_keys AS STRING)) AS details,
     CASE WHEN vm.null_keys > 0 THEN 'Check JOIN conditions with dim_date in DML' ELSE 'No action required' END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
-    NULL AS date,
+    vm.date AS date,
     vm.current_batch_id AS silver_batch_id
 FROM validation_metrics vm
 
@@ -194,8 +176,9 @@ SELECT
     CASE WHEN ri.orphan_dates > 0 THEN 'Refresh dim_date or check year/month values in fact_sell_in' ELSE 'No action required' END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
     NULL AS date,
-    (SELECT current_batch_id FROM validation_metrics) AS silver_batch_id
+    vm.current_batch_id AS silver_batch_id
 FROM ref_integrity ri
+LEFT JOIN (SELECT MAX(current_batch_id) AS current_batch_id FROM validation_metrics) vm ON 1=1
 
 UNION ALL
 
@@ -228,8 +211,9 @@ SELECT
     END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
     NULL AS date,
-    (SELECT current_batch_id FROM validation_metrics) AS silver_batch_id
+    vm.current_batch_id AS silver_batch_id
 FROM ref_integrity ri
+LEFT JOIN (SELECT MAX(current_batch_id) AS current_batch_id FROM validation_metrics) vm ON 1=1
 
 UNION ALL
 
@@ -249,8 +233,9 @@ SELECT
     CASE WHEN ri.orphan_products > 0 THEN 'Review and add missing products to dim_product' ELSE 'No action required' END AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
     NULL AS date,
-    (SELECT current_batch_id FROM validation_metrics) AS silver_batch_id
+    vm.current_batch_id AS silver_batch_id
 FROM ref_integrity ri
+LEFT JOIN (SELECT MAX(current_batch_id) AS current_batch_id FROM validation_metrics) vm ON 1=1
 
 UNION ALL
 
@@ -433,30 +418,38 @@ FROM validation_metrics vm
 
 UNION ALL
 
--- 14. BATCH SUMMARY
 SELECT 
     uuid() AS validation_id,
     'batch_summary' AS validation_name,
     'summary' AS validation_category,
     'INFO' AS status,
     'INFO' AS severity,
-    vm.total_records AS total_rows,
+    global_metrics.total_records AS total_rows,
     0 AS failed_rows,
     0.0 AS failed_percentage,
-    CONCAT('Months: ', CAST(vm.months_processed AS STRING), 
-           ' | PDVs: ', CAST(vm.pdvs_processed AS STRING),
-           ' | Products: ', CAST(vm.products_processed AS STRING)) AS metric_value,
+    CONCAT('Months: ', CAST(global_metrics.months_processed AS STRING), 
+           ' | PDVs: ', CAST(global_metrics.pdvs_processed AS STRING),
+           ' | Products: ', CAST(global_metrics.products_processed AS STRING)) AS metric_value,
     'N/A' AS threshold_value,
     CONCAT('Batch processed - ',
-           'Records: ', CAST(vm.total_records AS STRING),
-           ', Months: ', CAST(vm.months_processed AS STRING),
-           ', PDVs: ', CAST(vm.pdvs_processed AS STRING),
-           ', Products: ', CAST(vm.products_processed AS STRING),
-           ', Avg quality: ', CAST(vm.avg_confidence_score AS STRING)) AS details,
+           'Records: ', CAST(global_metrics.total_records AS STRING),
+           ', Months: ', CAST(global_metrics.months_processed AS STRING),
+           ', PDVs: ', CAST(global_metrics.pdvs_processed AS STRING),
+           ', Products: ', CAST(global_metrics.products_processed AS STRING),
+           ', Avg quality: ', CAST(global_metrics.avg_confidence_score AS STRING)) AS details,
     'No action required' AS recommended_action,
     CURRENT_TIMESTAMP() AS execution_timestamp,
     NULL AS year_month_id,
-    vm.current_batch_id AS silver_batch_id
-FROM validation_metrics vm
+    global_metrics.current_batch_id AS silver_batch_id
+FROM (
+    SELECT
+        COUNT(*) AS total_records,
+        COUNT(DISTINCT date) AS months_processed,
+        COUNT(DISTINCT pdv_code) AS pdvs_processed,
+        COUNT(DISTINCT product_code) AS products_processed,
+        ROUND(AVG(data_confidence_score), 2) AS avg_confidence_score,
+        MAX(silver_batch_id) AS current_batch_id
+    FROM workspace.gold.fact_pdv_monthly_health
+) global_metrics
 
 ) final_validations;

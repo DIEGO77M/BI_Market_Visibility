@@ -52,7 +52,7 @@ SELECT
     audit_date_id
 FROM (
     -- =========================
-    -- 1. ROW COUNT CHECK
+    -- 1. ROW COUNT CHECK (por mes)
     -- =========================
     SELECT 
         uuid() AS validation_id,
@@ -68,13 +68,14 @@ FROM (
         CONCAT('Total records loaded: ', CAST(COUNT(*) AS STRING)) AS details,
         CASE WHEN COUNT(*) = 0 THEN 'Check DML load and source data' ELSE 'No action required' END AS recommended_action,
         CURRENT_TIMESTAMP() AS execution_timestamp,
-        CAST(NULL AS DATE) AS audit_date_id
+        audit_date_id
     FROM workspace.gold.mart_revenue_leakage
+    GROUP BY audit_date_id
 
     UNION ALL
 
     -- =========================
-    -- 2. PRIMARY KEY UNIQUENESS
+    -- 2. PRIMARY KEY UNIQUENESS (por mes)
     -- =========================
     SELECT 
         uuid() AS validation_id,
@@ -90,17 +91,19 @@ FROM (
         CONCAT('Duplicate PK records: ', CAST(SUM(duplicate_flag) AS STRING)) AS details,
         CASE WHEN SUM(duplicate_flag) > 0 THEN 'Review INSERT logic - use INSERT OVERWRITE' ELSE 'No action required' END AS recommended_action,
         CURRENT_TIMESTAMP() AS execution_timestamp,
-        CAST(NULL AS DATE) AS audit_date_id
+        audit_date_id
     FROM (
         SELECT 
+            audit_date_id,
             CASE WHEN COUNT(*) OVER (PARTITION BY audit_date_id, pdv_code, product_code) > 1 THEN 1 ELSE 0 END AS duplicate_flag
         FROM workspace.gold.mart_revenue_leakage
     )
+    GROUP BY audit_date_id
 
     UNION ALL
 
     -- =========================
-    -- 3. NULL BUSINESS KEYS
+    -- 3. NULL BUSINESS KEYS (por mes)
     -- =========================
     SELECT 
         uuid() AS validation_id,
@@ -116,12 +119,14 @@ FROM (
         CONCAT('Records with NULL business keys: ', CAST(SUM(null_flag) AS STRING)) AS details,
         CASE WHEN SUM(null_flag) > 0 THEN 'Check INNER JOIN in base_data CTE' ELSE 'No action required' END AS recommended_action,
         CURRENT_TIMESTAMP() AS execution_timestamp,
-        CAST(NULL AS DATE) AS audit_date_id
+        audit_date_id
     FROM (
         SELECT 
+            audit_date_id,
             CASE WHEN audit_date_id IS NULL OR pdv_code IS NULL OR product_code IS NULL THEN 1 ELSE 0 END AS null_flag
         FROM workspace.gold.mart_revenue_leakage
     )
+    GROUP BY audit_date_id
 
     UNION ALL
 
