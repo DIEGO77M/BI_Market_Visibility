@@ -1,6 +1,7 @@
 CREATE OR REPLACE VIEW workspace.gold.vw_validation_metrics AS
 SELECT
-  'pdv_monthly_health'      AS source,
+  'pdv_monthly_health' AS source,
+  validation_id,
   validation_name,
   validation_category,
   status,
@@ -8,14 +9,17 @@ SELECT
   total_rows,
   failed_rows,
   failed_percentage,
+  details,
+  recommended_action,
   execution_timestamp,
-  date                      AS period
+  DATE_TRUNC('month', execution_timestamp) AS period
 FROM workspace.gold.validation_pdv_monthly_health
 
 UNION ALL
 
 SELECT
-  'mart_revenue_leakage'    AS source,
+  'mart_revenue_leakage' AS source,
+  validation_id,
   validation_name,
   validation_category,
   status,
@@ -23,6 +27,8 @@ SELECT
   total_rows,
   failed_rows,
   failed_percentage,
+  details,
+  recommended_action,
   execution_timestamp,
-  audit_date_id             AS period
+  DATE_TRUNC('month', execution_timestamp) AS period
 FROM workspace.gold.validation_mart_revenue_leakage;
