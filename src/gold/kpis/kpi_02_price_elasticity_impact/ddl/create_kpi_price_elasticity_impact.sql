@@ -267,9 +267,3 @@ WHERE avg_observed_price > 0
   AND avg_competitor_price > 0
   AND affected_pdvs >= 3;
 
--- =====================================================================
--- Optimize for query performance
--- =====================================================================
-
-OPTIMIZE workspace.gold.kpi_price_elasticity_impact
-ZORDER BY (product_code, price_sensitivity_segment);

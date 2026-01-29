@@ -1,3 +1,5 @@
+# Ignore Gold KPIs completion summary
+src/gold/kpis/Project_Completed.txt
 # .gitignore
 # Add files and directories to ignore below
 
