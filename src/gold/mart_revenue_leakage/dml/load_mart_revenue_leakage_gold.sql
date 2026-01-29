@@ -40,7 +40,10 @@ WITH base_data AS (
         -- Expected assortment
         ea.expected_flag
 
-    FROM workspace.gold.fact_pdv_price_audit pa
+    FROM (
+        SELECT *, YEAR(audit_date) AS pa_year, MONTH(audit_date) AS pa_month
+        FROM workspace.gold.fact_pdv_price_audit
+    ) pa
 
     INNER JOIN workspace.gold.dim_pdv pdv
         ON pa.pdv_code = pdv.pdv_code
@@ -54,10 +57,14 @@ WITH base_data AS (
        AND pa.product_code = ea.product_code
        AND ea.is_current = TRUE
 
-    LEFT JOIN workspace.gold.fact_pdv_monthly_health mh
+    LEFT JOIN (
+        SELECT *, YEAR(date) AS mh_year, MONTH(date) AS mh_month
+        FROM workspace.gold.fact_pdv_monthly_health
+    ) mh
         ON pa.pdv_code = mh.pdv_code
        AND pa.product_code = mh.product_code
-       AND DATE_TRUNC('month', pa.audit_date) = mh.date
+       AND pa.pa_year = mh.mh_year
+       AND pa.pa_month = mh.mh_month
 
     WHERE pa.audit_date IS NOT NULL
 ),
@@ -107,7 +114,7 @@ factors AS (
     FROM base_data
 )
 
-INSERT INTO gold.mart_revenue_leakage
+INSERT OVERWRITE gold.mart_revenue_leakage
 (
     audit_date_id,
     pdv_code,
