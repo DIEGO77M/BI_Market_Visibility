@@ -1,0 +1,70 @@
+# Gold Layer Orchestrator – Databricks Asset Bundle Workflow
+# Executes all Gold notebooks in strict business order, with full auditability and modularity.
+# Order: Dimensions → Facts & Mart → KPIs
+# Senior-level orchestration: idempotent, modular, observable, and ready for CI/CD.
+
+bundle:
+  name: BI_Market_Visibility
+
+# ============================================================================
+# RESOURCES - Define all assets (jobs, pipelines, notebooks, etc.)
+# ============================================================================
+resources:
+  jobs:
+    gold_orchestrator:
+      name: Master_Gold_Orchestrator
+      max_concurrent_runs: 1
+      timeout_seconds: 28800
+      
+      tags:
+        layer: "gold"
+        domain: "medallion_architecture"
+        frequency: "monthly"
+        owner: "Diego Mayorga"
+
+      # Schedule - Monthly execution at 3 AM UTC (PAUSED)
+      schedule:
+        quartz_cron_expression: "0 0 3 2 * ?"  # Day 2 of each month
+        timezone_id: "UTC"
+        pause_status: "PAUSED"
+
+      tasks:
+        # Task 1: Gold Dimensions
+        - task_key: gold_dimensions
+          description: "Run Gold Dimensions Orchestrator - Loads all gold dimensions"
+          notebook_task:
+            notebook_path: /Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/src/gold/notebooks/Orchestrate_Dimensions_Only_Gold_Layer
+          timeout_seconds: 7200
+          max_retries: 1
+          depends_on: []
+
+        # Task 2: Gold Facts & Mart
+        - task_key: gold_facts_mart
+          description: "Run Gold Facts & Mart Orchestrator - Loads all gold facts and mart tables"
+          notebook_task:
+            notebook_path: /Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/src/gold/notebooks/Orchestrate_Facts_Mart_Gold_Layer
+          timeout_seconds: 7200
+          max_retries: 1
+          depends_on:
+            - task_key: gold_dimensions
+
+        # Task 3: Gold KPIs
+        - task_key: gold_kpis
+          description: "Run Gold KPIs Orchestrator - Calculates all gold KPIs"
+          notebook_task:
+            notebook_path: /Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/BI_Market_Visibility/dev/files/src/gold/notebooks/Orchestrate_All_KPIs
+          timeout_seconds: 7200
+          max_retries: 1
+          depends_on:
+            - task_key: gold_facts_mart
+
+# ============================================================================
+# TARGETS - Environment configurations
+# ============================================================================
+targets:
+  dev:
+    mode: production
+    default: true
+    workspace:
+      host: https://dbc-fd5c2cc6-9b83.cloud.databricks.com
+      root_path: /Workspace/Users/diego.mayorgacapera@gmail.com/.bundle/${bundle.name}/${bundle.target}

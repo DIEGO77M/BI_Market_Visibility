@@ -10,6 +10,7 @@ bundle:
 # ============================================================================
 include:
   - orchestration/jobs/orchestrate_silver_pipeline.yml
+  - orchestration/jobs/orchestrate_gold_pipeline.yml
 
 # ============================================================================
 # TARGETS - Environment configurations
