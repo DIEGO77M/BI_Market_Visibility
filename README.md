@@ -52,6 +52,45 @@ A unified analytics platform for Retail/FMCG, designed to solve revenue leakage,
 
 ---
 
+## 📹 Featured Video: AI-Powered Business Intelligence Pipeline
+
+[![Watch the video](https://img.youtube.com/vi/VTwLHWUq4xo/0.jpg)](https://youtu.be/VTwLHWUq4xo)
+
+> This video showcases an automated analytics system that transforms raw operational data into prioritized daily insights—without manual intervention.
+
+**Tech Stack:**
+- n8n (Workflow Orchestration)
+- Databricks (Data Warehouse & Compute)
+- Anthropic Claude AI (Intelligence Layer)
+- Python (Data Transformation)
+- Streamlit (Dashboard Visualization)
+
+**Architecture Overview:**
+1. **Data Ingestion:** n8n orchestrates 7 KPI tables from Databricks via REST API
+2. **Transformation Layer:** Custom Code nodes parse JSON, apply business logic, filter anomalies, and calculate metrics
+3. **Unification Pipeline:** Merge node consolidates 7 parallel data streams into a unified analytics payload
+4. **AI Intelligence:** Anthropic Claude acts as a Management BI Analyst, prioritizing insights and urgent actions
+5. **Data Persistence:** AI-generated analysis writes back to Databricks, then renders in real-time Streamlit dashboard
+
+**Result:**
+- Automated daily business intelligence reports with AI-driven prioritization
+- Converts AI from a reactive tool into a proactive strategic analyst
+
+**Key Innovation:**
+- AI ranks urgency and flags critical interventions for immediate action
+
+**Business Impact:**
+- Zero manual analysis required
+- Same-day actionable insights
+- Executive-level intelligence at scale
+- Continuous monitoring and alerting
+
+**Project Details:**
+- Production-ready for retail operations forensics
+- Processes $200K+ in financial metrics and generates comprehensive audit reports automatically
+
+---
+
 ## 7. Technology Stack & Tools
 
 | Tool / Platform   | Purpose / Role                       |
@@ -65,6 +104,8 @@ A unified analytics platform for Retail/FMCG, designed to solve revenue leakage,
 | 🛡️ Unity Catalog   | Centralized governance, security             |
 | 📦 Asset Bundles   | CI/CD, deployment automation                 |
 | 🗂️ Git             | Version control, collaboration               |
+| 🤖 Anthropic Claude AI | AI-driven business intelligence           |
+| 🔗 n8n             | Workflow orchestration, REST API integration |
 
 ---
 
