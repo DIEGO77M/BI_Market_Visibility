@@ -3,6 +3,32 @@ src/gold/kpis/Project_Completed.txt
 # .gitignore
 # Add files and directories to ignore below
 
-.databricks
+# Databricks/DBX/Bundle/Notebook/Cache/Temp
+.databricks/
+.dbx/
+.bundle/
+.pytest_cache/
+.ipynb_checkpoints/
 
-.databricks
+# Python cache and virtual environments
+__pycache__/
+*.pyc
+venv/
+.env
+.envrc
+
+# VSCode and OS files
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local configs and credentials (if any)
+local.env
+.databrickscfg
+
+# Logs and temp
+logs/
+*.log
+.agents/
+.github/
