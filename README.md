@@ -143,9 +143,16 @@ A unified analytics platform for Retail/FMCG, designed to solve revenue leakage,
 - **src/tests/**: Data quality, integration, and unit tests
 - **orchestration/**: Jobs, workflows, and automation scripts
 - **KPIs**: Each KPI table includes a dedicated README explaining its business impact, calculation logic, and executive relevance
-- Start with docs/architecture/README.md for a high-level overview
+ Start with docs/architecture/README.md for a high-level overview
 
----
+## 11. Environment & Compatibility
+- **IDE:** Visual Studio Code
+- **Deployment:** Databricks Asset Bundles (`databricks bundle deploy --profile DTB_Market_Visibility`)
+- **Compute:** 100% compatible with Databricks Serverless (no classic cluster dependencies)
+- **Governance:** Unity Catalog for schema and security management
+
+All code, documentation, and orchestration scripts are designed to be idempotent, deterministic, and fully auditable in enterprise environments.
+
 
 ## Project Authorship & AI Collaboration
 This project was developed and architected by Diego Mayorga, leveraging AI tools such as GitHub Copilot exclusively for support in documentation, code review, and productivity. All engineering, architecture, and business logic decisions are original and reflect real-world experience in enterprise analytics.

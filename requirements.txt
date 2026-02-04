@@ -1,6 +1,25 @@
+# Core data engineering and analytics
 pandas
 numpy
 pyyaml
+requests
+
+# Databricks and orchestration
+# databricks-cli is used for legacy CLI operations
+# databricks-bundle is required for Asset Bundles deployment
+# Both are pinned for compatibility with Databricks Serverless
+# (Do not upgrade unless tested in serverless environment)
 databricks-cli==0.17.0
 databricks-bundle
-requests
+
+# Optional: For Excel file generation in data simulation
+dopenpyxl
+
+# Optional: For advanced validation and monitoring (if used in tests)
+pytest
+
+# Optional: For API and workflow integration (if running n8n locally)
+# n8n is not a Python package, but requests is used for REST API calls
+
+# Note: PySpark is not included here as all Spark code runs on Databricks Serverless
+# and is managed via notebooks/jobs, not local Python environment.

@@ -19,7 +19,7 @@ USING DELTA
 PARTITIONED BY (date)
 AS
 SELECT
-  CONCAT(YEAR(audit_date_id), '-', LPAD(MONTH(audit_date_id), 2, '0'), '-01') AS date,
+  TO_DATE(CONCAT(YEAR(audit_date_id), '-', LPAD(MONTH(audit_date_id), 2, '0'), '-01')) AS date,
   product_code,
   brand,
   category,

@@ -113,7 +113,7 @@ pdv_level_velocity AS (
   SELECT
     w.year,
     w.month,
-    CONCAT(w.year, '-', LPAD(w.month, 2, '0'), '-01') AS date,
+    TO_DATE(CONCAT(w.year, '-', LPAD(w.month, 2, '0'), '-01')) AS date,
     w.pdv_code,
     w.product_code,
     p.brand,
