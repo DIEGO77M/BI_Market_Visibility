@@ -1,14 +1,5 @@
 # BI Market Visibility – Executive Analytics Platform
 
-<p align="center">
-  <img src="https://databricks.com/wp-content/uploads/2021/10/databricks-logo.png" alt="Databricks" height="32"/>
-  <img src="https://upload.wikimedia.org/wikipedia/commons/3/31/Delta_Lake_logo.png" alt="Delta Lake" height="32"/>
-  <img src="https://upload.wikimedia.org/wikipedia/commons/0/05/Streamlit_logo.svg" alt="Streamlit" height="32"/>
-  <img src="https://upload.wikimedia.org/wikipedia/commons/0/0a/PySpark_logo.png" alt="PySpark" height="32"/>
-  <img src="https://upload.wikimedia.org/wikipedia/commons/c/c3/Python-logo-notext.svg" alt="Python" height="32"/>
-  <img src="https://upload.wikimedia.org/wikipedia/commons/8/87/Sql_data_base_with_logo.png" alt="SQL" height="32"/>
-</p>
-
 ---
 
 ## 1. Project Overview (Executive Summary)
@@ -65,15 +56,15 @@ A unified analytics platform for Retail/FMCG, designed to solve revenue leakage,
 
 | Tool / Platform   | Purpose / Role                       |
 |-------------------|--------------------------------------|
-| <img src="https://databricks.com/wp-content/uploads/2021/10/databricks-logo.png" height="20"/> Databricks | Serverless compute, orchestration, governance |
-| <img src="https://upload.wikimedia.org/wikipedia/commons/3/31/Delta_Lake_logo.png" height="20"/> Delta Lake | ACID storage, time travel, schema evolution   |
-| <img src="https://upload.wikimedia.org/wikipedia/commons/0/05/Streamlit_logo.svg" height="20"/> Streamlit | Executive dashboards, rapid prototyping      |
-| <img src="https://upload.wikimedia.org/wikipedia/commons/0/0a/PySpark_logo.png" height="20"/> PySpark    | Distributed data processing                  |
-| <img src="https://upload.wikimedia.org/wikipedia/commons/c/c3/Python-logo-notext.svg" height="20"/> Python | Data engineering, scripting                  |
-| <img src="https://upload.wikimedia.org/wikipedia/commons/8/87/Sql_data_base_with_logo.png" height="20"/> SQL    | Data modeling, validation, business logic     |
-| Unity Catalog     | Centralized governance, security     |
-| Asset Bundles     | CI/CD, deployment automation         |
-| Git               | Version control, collaboration       |
+| 🟧 Databricks      | Serverless compute, orchestration, governance |
+| 💧 Delta Lake      | ACID storage, time travel, schema evolution   |
+| 🚦 Streamlit       | Executive dashboards, rapid prototyping      |
+| 🔥 PySpark         | Distributed data processing                  |
+| 🐍 Python          | Data engineering, scripting                  |
+| 🗄️ SQL             | Data modeling, validation, business logic     |
+| 🛡️ Unity Catalog   | Centralized governance, security             |
+| 📦 Asset Bundles   | CI/CD, deployment automation                 |
+| 🗂️ Git             | Version control, collaboration               |
 
 ---
 
