@@ -132,6 +132,7 @@ A unified analytics platform for Retail/FMCG, designed to solve revenue leakage,
 - **src/bronze, src/silver, src/gold/**: Layered data pipelines and logic
 - **src/tests/**: Data quality, integration, and unit tests
 - **orchestration/**: Jobs, workflows, and automation scripts
+- **KPIs**: Each KPI table includes a dedicated README explaining its business impact, calculation logic, and executive relevance
 - Start with docs/architecture/README.md for a high-level overview
 
 ---
