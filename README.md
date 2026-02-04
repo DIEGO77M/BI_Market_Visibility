@@ -27,9 +27,9 @@ A unified analytics platform for Retail/FMCG, designed to solve revenue leakage,
 
 | Layer   | Responsibility                        | Guarantees                  | Business Role                |
 |---------|----------------------------------------|-----------------------------|------------------------------|
-| 🟫 Bronze  | Raw ingestion, technical validation    | No business logic, full lineage | Data Engineering             |
-| 🟪 Silver  | Cleaning, enrichment, business rules   | Deduplication, referential integrity | Analytics, BI                |
-| 🟨 Gold    | KPI calculation, business logic        | Executive-ready, audit-first | Commercial, RGM, Finance     |
+| 🥉 Bronze  | Raw ingestion, technical validation    | No business logic, full lineage | Data Engineering             |
+| 🥈 Silver  | Cleaning, enrichment, business rules   | Deduplication, referential integrity | Analytics, BI                |
+| 🥇 Gold    | KPI calculation, business logic        | Executive-ready, audit-first | Commercial, RGM, Finance     |
 
 - Gold layer is the only source for business decisions and KPIs
 - Architecture supports scale, governance, and rapid change
