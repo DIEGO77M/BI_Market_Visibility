@@ -67,11 +67,13 @@ A unified analytics platform for Retail/FMCG, designed to solve revenue leakage,
 
 > This video showcases an automated analytics system that transforms kpi metrcis into prioritized daily insights—without manual intervention.
 
+> This project also leverages JavaScript for custom Code nodes within the n8n orchestration layer, enabling advanced business logic and anomaly detection with AI support. The use of JavaScript allows for flexible, real-time transformation and prioritization of KPI metrics, with Copilot providing documentation and code suggestions—while all business logic and architecture decisions remain original.
+
 **Tech Stack:**
 - n8n (Workflow Orchestration)
 - Databricks (Data Warehouse & Compute)
 - Anthropic Claude AI (Intelligence Layer)
-- Python (Data Transformation)
+- Javascript (Data Transformation)
 - Streamlit (Dashboard Visualization)
 
 **Architecture Overview:**
