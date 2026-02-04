@@ -42,6 +42,15 @@ A unified analytics platform for Retail/FMCG, designed to solve revenue leakage,
 - **mart_revenue_leakage**: Revenue leakage factors, lost opportunity quantification
 - Each table exposes actionable metrics for executive dashboards and operational alerts
 
+**KPIs Gold Layer – Executive Business Impact:**
+- **Recovery Opportunity Score**: Prioritizes where to recover lost revenue fastest, focusing on PDV–product–month combinations with the highest economic impact and recoverability.
+- **Price Elasticity Impact**: Identifies products with high price sensitivity, quantifies revenue loss due to price changes, and flags hidden execution issues across PDVs.
+- **Execution ROI**: Measures the real business impact of merchandiser visits, showing where execution-driven revenue loss is highest and guiding resource allocation.
+- **Channel & Chain Performance**: Segments revenue leakage by channel and chain, enabling differentiated commercial strategies and investment prioritization.
+- **Product Portfolio Health**: Classifies products as healthy, at risk, or critical, recommending actions (strengthen, maintain, discontinue) to optimize assortment and resource allocation.
+- **Competitive Position Velocity**: Quantifies how fast and where products are losing or regaining competitive position at PDV, enabling early intervention and market defense.
+- **Perfect Storm Index**: Detects PDV–product combinations where all critical factors (stock, price, execution, assortment) fail simultaneously, requiring cross-functional intervention to prevent catastrophic losses.
+
 ---
 
 ## 6. Data Quality, Validation & Trust
@@ -91,6 +100,7 @@ A unified analytics platform for Retail/FMCG, designed to solve revenue leakage,
 - Production-ready for retail operations forensics
 - Processes $200K+ in financial metrics and generates comprehensive audit reports automatically
 
+> This project is designed to be understood and evaluated in minutes by technical and business leaders. Every decision is intentional, every metric is traceable, and every layer is built for enterprise impact.
 ---
 
 ## 7. Technology Stack & Tools
@@ -145,5 +155,3 @@ This project was developed and architected by Diego Mayorga, leveraging AI tools
 - **Development Environment**: All work was performed in Visual Studio Code, using Databricks Asset Bundles for file management, deployment, and orchestration.
 
 ---
-
-> This project is designed to be understood and evaluated in minutes by technical and business leaders. Every decision is intentional, every metric is traceable, and every layer is built for enterprise impact.
