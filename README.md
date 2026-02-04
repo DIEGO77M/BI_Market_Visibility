@@ -2,15 +2,6 @@
 
 ---
 
-## 0. Project Authorship & AI Collaboration
-This project was developed and architected by Diego Mayorga, leveraging AI tools such as GitHub Copilot exclusively for support in documentation, code review, and productivity. All engineering, architecture, and business logic decisions are original and reflect real-world experience in enterprise analytics.
-
-- **AI Usage**: Copilot was used as a documentation and coding assistant, not as a decision-maker.
-- **Documentation Skills**: Custom skills and templates were applied to ensure business-first, recruiter-ready documentation.
-- **Development Environment**: All work was performed in Visual Studio Code, using Databricks Asset Bundles for file management, deployment, and orchestration.
-
----
-
 ## 1. Project Overview (Executive Summary)
 A unified analytics platform for Retail/FMCG, designed to solve revenue leakage, pricing misalignment, and operational blind spots. Built for Commercial, RGM, BI, and Finance teams to enable confident, data-driven decisions at scale.
 
@@ -142,6 +133,15 @@ A unified analytics platform for Retail/FMCG, designed to solve revenue leakage,
 - **src/tests/**: Data quality, integration, and unit tests
 - **orchestration/**: Jobs, workflows, and automation scripts
 - Start with docs/architecture/README.md for a high-level overview
+
+---
+
+## Project Authorship & AI Collaboration
+This project was developed and architected by Diego Mayorga, leveraging AI tools such as GitHub Copilot exclusively for support in documentation, code review, and productivity. All engineering, architecture, and business logic decisions are original and reflect real-world experience in enterprise analytics.
+
+- **AI Usage**: Copilot was used as a documentation and coding assistant, not as a decision-maker.
+- **Documentation Skills**: Custom skills and templates were applied to ensure business-first, recruiter-ready documentation.
+- **Development Environment**: All work was performed in Visual Studio Code, using Databricks Asset Bundles for file management, deployment, and orchestration.
 
 ---
 
