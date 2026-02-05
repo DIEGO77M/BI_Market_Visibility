@@ -20,7 +20,6 @@ PARTITIONED BY (date)
 AS
 SELECT
   audit_date_id AS date,
-  UPPER(chain) || '|' || UPPER(channel) AS chain_channel_id,
   channel,
   chain,
   
@@ -82,6 +81,5 @@ FROM workspace.gold.mart_revenue_leakage
 
 GROUP BY 
   audit_date_id,
-  UPPER(chain),
   channel,
   chain;

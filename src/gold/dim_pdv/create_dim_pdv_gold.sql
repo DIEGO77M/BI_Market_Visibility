@@ -19,7 +19,6 @@ validated AS (
     chain,
     channel,
     UPPER(chain) || '|' || UPPER(channel) AS chain_channel_id,
-    UPPER(chain) || '|' || UPPER(channel) || '|' || COALESCE(UPPER(merchandiser_code), 'NA') AS chain_channel_merchandiser_id,
     city,
     -- Business rule: derive store_size from sub_channel, fallback to 'unknown' for data governance
     COALESCE(ssm.store_size, 'unknown') AS store_size,
