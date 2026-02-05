@@ -68,6 +68,7 @@ SELECT
   pdv.merchandiser_name,
   pdv.chain,
   pdv.channel,
+  UPPER(pdv.chain) || '|' || UPPER(pdv.channel) || '|' || COALESCE(UPPER(pdv.merchandiser_code), 'NA') AS chain_channel_merchandiser_id,
   pdv.city,
   
   -- Coverage metrics
@@ -135,4 +136,5 @@ GROUP BY
   pdv.merchandiser_name,
   pdv.chain,
   pdv.channel,
+  chain_channel_merchandiser_id,
   pdv.city;
