@@ -68,6 +68,7 @@ SELECT
   pdv.merchandiser_name,
   pdv.chain,
   pdv.channel,
+  UPPER(pdv.chain) || '|' || UPPER(pdv.channel) AS chain_channel_id,
   pdv.city,
   
   -- Coverage metrics
