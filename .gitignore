@@ -33,3 +33,7 @@ logs/
 .agents/
 .github/
 .github/copilot-instructions.md
+
+# Power BI and Databricks files
+BI_Market_Visibility.pbix
+dashboard/databricks-Serverless Starter mWarehouse.pbids
