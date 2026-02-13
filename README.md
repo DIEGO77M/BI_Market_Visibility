@@ -15,7 +15,11 @@ Access the Revenue Leakage Executive Overview dashboard here:
 
 [Open Power BI Dashboard](https://app.powerbi.com/view?r=eyJrIjoiZGQ0MWNmMDQtNGQyNS00MjI2LTg4ZjAtNTVhZWYzOGMyNDk4IiwidCI6Ijk0YTk5NDE2LTE3MjItNDNhMC04MTQ0LTc2NWNiNDQxNmUxMCIsImMiOjR9)
 
-This dashboard provides a business-wide executive overview, focusing on revenue leakage, key KPIs, and actionable insights for decision-makers.
+Access the Revenue Leakage Executive Overview dashboard here:
+
+[Open Power BI Dashboard](https://app.powerbi.com/view?r=eyJrIjoiZGQ0MWNmMDQtNGQyNS00MjI2LTg4ZjAtNTVhZWYzOGMyNDk4IiwidCI6Ijk0YTk5NDE2LTE3MjItNDNhMC04MTQ0LTc2NWNiNDQxNmUxMCIsImMiOjR9)
+
+This dashboard provides a business-wide executive overview, focusing on revenue leakage, key KPIs, and actionable insights for decision-makers. 🏗️ The remaining tabs are currently under construction and will be available soon.
 
 ---
 
