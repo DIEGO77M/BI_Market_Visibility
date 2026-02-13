@@ -9,12 +9,6 @@ A unified analytics platform for Retail/FMCG, designed to solve revenue leakage,
 
 ## 📊 Executive Power BI Dashboard
 
-## 📊 Executive Power BI Dashboard
-
-Access the Revenue Leakage Executive Overview dashboard here:
-
-[Open Power BI Dashboard](https://app.powerbi.com/view?r=eyJrIjoiZGQ0MWNmMDQtNGQyNS00MjI2LTg4ZjAtNTVhZWYzOGMyNDk4IiwidCI6Ijk0YTk5NDE2LTE3MjItNDNhMC04MTQ0LTc2NWNiNDQxNmUxMCIsImMiOjR9)
-
 Access the Revenue Leakage Executive Overview dashboard here:
 
 [Open Power BI Dashboard](https://app.powerbi.com/view?r=eyJrIjoiZGQ0MWNmMDQtNGQyNS00MjI2LTg4ZjAtNTVhZWYzOGMyNDk4IiwidCI6Ijk0YTk5NDE2LTE3MjItNDNhMC04MTQ0LTc2NWNiNDQxNmUxMCIsImMiOjR9)
