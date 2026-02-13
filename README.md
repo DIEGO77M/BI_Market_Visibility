@@ -7,6 +7,18 @@ A unified analytics platform for Retail/FMCG, designed to solve revenue leakage,
 
 ---
 
+## 📊 Executive Power BI Dashboard
+
+## 📊 Executive Power BI Dashboard
+
+Access the Revenue Leakage Executive Overview dashboard here:
+
+[Open Power BI Dashboard](https://app.powerbi.com/view?r=eyJrIjoiZGQ0MWNmMDQtNGQyNS00MjI2LTg4ZjAtNTVhZWYzOGMyNDk4IiwidCI6Ijk0YTk5NDE2LTE3MjItNDNhMC04MTQ0LTc2NWNiNDQxNmUxMCIsImMiOjR9)
+
+This dashboard provides a business-wide executive overview, focusing on revenue leakage, key KPIs, and actionable insights for decision-makers.
+
+---
+
 ## 2. Business Problem & Real-World Context
 - Fragmented data leads to missed opportunities, stockouts, and pricing errors
 - Lack of trust in numbers undermines executive decisions
